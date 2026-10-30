@@ -4,7 +4,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppI
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 BOT_TOKEN = "9270736079:AAGEkAgT06gRHnP4AEXgbexHxW8nJ4e9ySw"
-WEBAPP_URL = "https:// mybot.bothost.tech/"  # ваш URL с bothost
+WEBAPP_URL = "https:// quest123.bothost.tech/"  # ваш URL с bothost
 
 logging.basicConfig(level=logging.INFO)
 
