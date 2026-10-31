@@ -22,7 +22,7 @@ export default {
         `;
         canvas = document.getElementById('snakeCanvas');
         ctx = canvas.getContext('2d');
-        
+
         const startGame = () => {
             snake = [{x: 150, y: 150}];
             score = 0;
