@@ -1,23 +1,18 @@
 const questions = [
-    { q: "Столица Австралии?", options: ["Сидней", "Мельбурн", "Канберра", "Перт"], answer: 2 },
-    { q: "Сколько планет в Солнечной системе?", options: ["8", "9", "7", "10"], answer: 0 },
-    { q: "Кто написал 'Войну и мир'?", options: ["Достоевский", "Толстой", "Пушкин", "Чехов"], answer: 1 }
+    { q: "В каком году в России впервые официально отметили Новый год 1 января?", options: ["1700", "1810", "1900", "1999"], answer: 0, hint: "Это сделал Петр I" },
+    { q: "Кто является официальным Дедом Морозом в США?", options: ["Санта-Клаус", "Йоулупукки", "Пэр Ноэль", "Бабай"], answer: 0, hint: "Приезжает на оленях" },
+    { q: "Как называется новогодний бал в Вене?", options: ["Опера", "Фестиваль", "Маскарад", "Карнавал"], answer: 0, hint: "Проходит в здании Оперы" }
 ];
 
 let currentQ = 0;
 
 export default {
-    title: "🧠 Эрудиция",
-    description: "Ответь на вопросы викторины",
-
+    title: "🧠 Новогодняя эрудиция",
+    description: "Ответь на вопросы",
     init(container, tg, onComplete) {
-        document.getElementById('quest-timer').innerText = 'Вопрос 1/3';
-        this.onComplete = onComplete;
-        this.tg = tg;
         currentQ = 0;
         showQuestion(container, tg, onComplete);
     },
-
     destroy() {}
 };
 
@@ -26,6 +21,10 @@ function showQuestion(container, tg, onComplete) {
     container.innerHTML = `
         <div style="font-size: 18px; font-weight: bold; margin-bottom: 20px; text-align: center;">${qData.q}</div>
         <div id="quiz-opts" style="display: flex; flex-direction: column; gap: 10px;"></div>
+        <div style="margin-top: 15px; display: flex; gap: 10px;">
+            <button id="btn-5050" style="flex:1; padding:10px; border-radius:8px; border:none; background:#f39c12; color:white;">50/50</button>
+            <button id="btn-hint" style="flex:1; padding:10px; border-radius:8px; border:none; background:#3498db; color:white;">Подсказка</button>
+        </div>
     `;
 
     const optsContainer = document.getElementById('quiz-opts');
@@ -33,31 +32,43 @@ function showQuestion(container, tg, onComplete) {
     qData.options.forEach((opt, index) => {
         const btn = document.createElement('div');
         btn.className = 'quiz-option';
+        btn.dataset.index = index;
         btn.innerText = opt;
-        btn.onclick = () => {
-            // Блокируем кнопки после ответа
-            optsContainer.querySelectorAll('.quiz-option').forEach(b => b.style.pointerEvents = 'none');
-
-            if (index === qData.answer) {
-                btn.classList.add('correct');
-                tg.HapticFeedback.notificationOccurred('success');
-
-                setTimeout(() => {
-                    currentQ++;
-                    if (currentQ < questions.length) {
-                        document.getElementById('quest-timer').innerText = `Вопрос ${currentQ + 1}/3`;
-                        showQuestion(container, tg, onComplete);
-                    } else {
-                        onComplete("Эрудиция");
-                    }
-                }, 1000);
-            } else {
-                btn.classList.add('wrong');
-                tg.HapticFeedback.notificationOccurred('error');
-                setTimeout(() => btn.classList.remove('wrong'), 1000);
-                setTimeout(() => optsContainer.querySelectorAll('.quiz-option').forEach(b => b.style.pointerEvents = 'auto'), 1000);
-            }
-        };
+        btn.onclick = () => checkAnswer(btn, index, qData, tg, container, onComplete);
         optsContainer.appendChild(btn);
     });
+
+    document.getElementById('btn-5050').onclick = () => {
+        // Убираем 2 неправильных
+        let removed = 0;
+        optsContainer.querySelectorAll('.quiz-option').forEach(btn => {
+            if (parseInt(btn.dataset.index) !== qData.answer && removed < 2) {
+                btn.style.opacity = '0.3';
+                btn.style.pointerEvents = 'none';
+                removed++;
+            }
+        });
+        document.getElementById('btn-5050').disabled = true;
+    };
+
+    document.getElementById('btn-hint').onclick = () => {
+        tg.showAlert(`Подсказка: ${qData.hint}`);
+        document.getElementById('btn-hint').disabled = true;
+    };
+}
+
+function checkAnswer(btn, index, qData, tg, container, onComplete) {
+    if (index === qData.answer) {
+        btn.classList.add('correct');
+        tg.HapticFeedback.notificationOccurred('success');
+        setTimeout(() => {
+            currentQ++;
+            if (currentQ < questions.length) showQuestion(container, tg, onComplete);
+            else onComplete(15); // 15 баллов за квиз
+        }, 1000);
+    } else {
+        btn.classList.add('wrong');
+        tg.HapticFeedback.notificationOccurred('error');
+        setTimeout(() => btn.classList.remove('wrong'), 1000);
+    }
 }

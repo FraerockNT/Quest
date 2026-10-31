@@ -1,43 +1,44 @@
-let interval;
-let towers = [[3,2,1], [], []];
-let selected = null;
+let interval, towers, selected;
+let disksCount, timeLimit;
 
 export default {
     title: "🏛 Ханойская башня",
-    description: "Собери все кольца на третьем стержне",
+    description: "Собери кольца на 3-м стержне",
+    init(container, tg, onComplete, questConfig) {
+        disksCount = questConfig?.hanoiDisks || 3;
+        timeLimit = questConfig?.hanoiTime || 60; // Время из настроек
 
-    init(container, tg, onComplete) {
+        towers = [Array.from({length: disksCount}, (_, i) => disksCount - i), [], []];
+        selected = null;
+
         container.innerHTML = `
-            <p style="text-align:center; margin-bottom: 10px; font-size:14px; color:gray">Нажми на стержень, чтобы взять/положить диск</p>
-            <div style="display: flex; justify-content: space-around; align-items: flex-end; height: 200px; margin: 20px 0;">
-                <div class="tower" onclick="hanoiClick(0)" style="width: 30%; height: 100%; border-bottom: 4px solid; position: relative; display: flex; flex-direction: column-reverse; align-items: center;"></div>
-                <div class="tower" onclick="hanoiClick(1)" style="width: 30%; height: 100%; border-bottom: 4px solid; position: relative; display: flex; flex-direction: column-reverse; align-items: center;"></div>
-                <div class="tower" onclick="hanoiClick(2)" style="width: 30%; height: 100%; border-bottom: 4px solid; position: relative; display: flex; flex-direction: column-reverse; align-items: center;"></div>
+            <p style="text-align:center; margin-bottom: 10px; font-size:14px; color:var(--hint-color)">Нажми на стержень, чтобы снять/положить диск</p>
+            <div id="hanoi-board" style="display: flex; justify-content: space-around; align-items: flex-end; height: 200px; margin: 20px 0;">
+                <div class="tower" onclick="window.hanoiClick(0)" style="width: 30%; height: 100%; border-bottom: 4px solid; position: relative; display: flex; flex-direction: column-reverse; align-items: center;"></div>
+                <div class="tower" onclick="window.hanoiClick(1)" style="width: 30%; height: 100%; border-bottom: 4px solid; position: relative; display: flex; flex-direction: column-reverse; align-items: center;"></div>
+                <div class="tower" onclick="window.hanoiClick(2)" style="width: 30%; height: 100%; border-bottom: 4px solid; position: relative; display: flex; flex-direction: column-reverse; align-items: center;"></div>
             </div>
         `;
 
-        towers = [[3,2,1], [], []];
-        selected = null;
-        render();
+        renderHanoi();
 
-        // Таймер (30 секунд)
-        let time = 30;
+        // Таймер
+        let timeLeft = timeLimit;
         const timerEl = document.getElementById('quest-timer');
-        timerEl.classList.remove('danger');
-        timerEl.innerText = `Время: ${time}с`;
+        timerEl.innerText = `⏱ ${timeLeft}с`;
 
+        clearInterval(interval);
         interval = setInterval(() => {
-            time--;
-            timerEl.innerText = `Время: ${time}с`;
-            if (time <= 10) timerEl.classList.add('danger');
-            if (time <= 0) {
+            timeLeft--;
+            timerEl.innerText = `⏱ ${timeLeft}с`;
+            if (timeLeft <= 0) {
                 clearInterval(interval);
+                tg.HapticFeedback.notificationOccurred('error');
                 tg.showAlert("Время вышло!");
-                window.app.goMenu();
+                onComplete(0);
             }
         }, 1000);
 
-        // Привязка функций
         window.hanoiClick = (towerIndex) => {
             const currentTower = towers[towerIndex];
             if (selected === null) {
@@ -55,32 +56,34 @@ export default {
                 selected = null;
                 tg.HapticFeedback.impactOccurred('medium');
             }
-            render();
+            renderHanoi();
 
-            if (towers[2].length === 3) {
+            if (towers[2].length === disksCount) {
                 clearInterval(interval);
-                onComplete(this.title);
+                window.hanoiClick = null;
+                tg.HapticFeedback.notificationOccurred('success');
+                onComplete(30);
             }
         };
     },
-
     destroy() {
         clearInterval(interval);
-        delete window.hanoiClick;
+        window.hanoiClick = null;
     }
 };
 
-function render() {
+function renderHanoi() {
     const towerEls = document.querySelectorAll('.tower');
     towerEls.forEach((el, index) => {
         el.innerHTML = '';
         towers[index].forEach(diskSize => {
             const disk = document.createElement('div');
-            disk.style.width = `${diskSize * 30 + 20}%`;
+            disk.style.width = `${(diskSize / disksCount) * 80 + 20}%`;
             disk.style.height = '20px';
             disk.style.borderRadius = '4px';
             disk.style.marginBottom = '2px';
-            disk.style.background = { 1: '#ff4757', 2: '#2ed573', 3: '#1e90ff' }[diskSize];
+            const colors = { 1: '#ff4757', 2: '#2ed573', 3: '#1e90ff', 4: '#eccc68', 5: '#9c88ff', 6: '#ff9ff3' };
+            disk.style.background = colors[diskSize] || '#888';
             el.appendChild(disk);
         });
     });
