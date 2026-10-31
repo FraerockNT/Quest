@@ -26,13 +26,18 @@ export default {
             timeLeft = config.mathTime;
             document.getElementById('quest-timer').innerText = `⏱ ${timeLeft}с`;
             clearInterval(interval);
+
             interval = setInterval(() => {
                 timeLeft--;
                 document.getElementById('quest-timer').innerText = `⏱ ${timeLeft}с`;
                 if (timeLeft <= 0) {
                     clearInterval(interval);
                     tg.HapticFeedback.notificationOccurred('error');
-                    onComplete(0);
+                    // Исправленный перезапуск
+                    tg.showAlert("Время вышло! Попробуй снова.", () => {
+                        currentQ = 0;
+                        renderQuestion();
+                    });
                 }
             }, 1000);
 
