@@ -1,102 +1,118 @@
-let interval, canvas, ctx, snake, food, score, dx, dy;
-let targetApples = 5; // По умолчанию
-const gridSize = 15;
+const GRID = 15, SIZE = 300, CELLS = SIZE / GRID;
+let interval, keyHandler;
+
+const clamp = (v, a, b, d) => { v = Number(v); return Number.isFinite(v) ? Math.min(b, Math.max(a, v)) : d; };
 
 export default {
-    title: "🐍 Змейка",
-    description: "Собери яблоки",
-    init(container, tg, onComplete, config) {
-        targetApples = config?.snakeApples || 5;
+    title: '🐍 Змейка',
+    description: 'Собери яблоки',
+    maxScore: 20,
+    defaultHint: 'Стены можно проходить насквозь — выйдешь с другой стороны. Не заворачивай змейку в кольцо.',
+    adminFields: [{ key: 'snakeApples', label: 'Сколько яблок собрать (1–20)', type: 'number', def: 5, min: 1, max: 20 }],
+
+    init(container, tg, onComplete, cfg = {}) {
+        this.destroy();
+        const target = clamp(cfg.snakeApples, 1, 20, 5);
+        const timerEl = document.getElementById('quest-timer');
 
         container.innerHTML = `
-            <canvas id="snakeCanvas" width="300" height="300" class="game-canvas" style="margin:0 auto;"></canvas>
-            <div style="display:grid; grid-template-columns: repeat(3, 60px); gap:10px; justify-content:center; margin-top:20px;">
-                <div></div>
-                <button class="btn" style="padding:15px; margin:0;" onclick="window.snakeMove('up')">↑</button>
-                <div></div>
-                <button class="btn" style="padding:15px; margin:0;" onclick="window.snakeMove('left')">←</button>
-                <button class="btn" style="padding:15px; margin:0;" onclick="window.snakeMove('down')">↓</button>
-                <button class="btn" style="padding:15px; margin:0;" onclick="window.snakeMove('right')">→</button>
+            <canvas id="snakeCanvas" width="${SIZE}" height="${SIZE}" class="game-canvas"></canvas>
+            <p class="note">Управляй свайпом по полю или кнопками</p>
+            <div class="dpad">
+                <div></div><button class="btn btn-ghost" data-d="up">↑</button><div></div>
+                <button class="btn btn-ghost" data-d="left">←</button><button class="btn btn-ghost" data-d="down">↓</button><button class="btn btn-ghost" data-d="right">→</button>
             </div>
-            <button class="btn" id="snake-restart" style="margin-top:10px; background:#ff4757;">Начать заново</button>
-        `;
-        canvas = document.getElementById('snakeCanvas');
-        ctx = canvas.getContext('2d');
+            <button class="btn btn-ghost" id="snake-restart">Начать заново</button>`;
+        const canvas = container.querySelector('#snakeCanvas');
+        const ctx = canvas.getContext('2d');
 
-        const startGame = () => {
-            snake = [{x: 150, y: 150}];
-            score = 0;
-            dx = 1; dy = 0; // Начинаем движение вправо
-            document.getElementById('quest-timer').innerText = `Яблок: 0/${targetApples}`;
-            generateFood();
-            clearInterval(interval);
-            interval = setInterval(() => update(tg, onComplete, startGame), 150);
+        let snake, food, score, dir, queue, over;
+        const DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+
+        const placeFood = () => {   // яблоко не появляется на змейке
+            const free = [];
+            for (let x = 0; x < CELLS; x++) for (let y = 0; y < CELLS; y++) if (!snake.some((s) => s.x === x && s.y === y)) free.push({ x, y });
+            food = free[Math.floor(Math.random() * free.length)];
         };
 
-        document.getElementById('snake-restart').onclick = startGame;
-        startGame();
+        const draw = () => {
+            ctx.clearRect(0, 0, SIZE, SIZE);
+            ctx.font = `${GRID}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText('🍎', food.x * GRID + GRID / 2, food.y * GRID + GRID / 2 + 1);
+            snake.forEach((s, i) => {
+                ctx.fillStyle = i === 0 ? '#7dffb0' : '#3ddc84';
+                if (ctx.roundRect) {
+                    ctx.beginPath();
+                    ctx.roundRect(s.x * GRID + 1, s.y * GRID + 1, GRID - 2, GRID - 2, 4);
+                    ctx.fill();
+                } else ctx.fillRect(s.x * GRID + 1, s.y * GRID + 1, GRID - 2, GRID - 2);
+            });
+        };
 
-        // Кнопки управления (запрет на разворот)
-        window.snakeMove = (dir) => {
-            if (dir === 'up' && dy !== 1) { dx = 0; dy = -1; }
-            if (dir === 'down' && dy !== -1) { dx = 0; dy = 1; }
-            if (dir === 'left' && dx !== 1) { dx = -1; dy = 0; }
-            if (dir === 'right' && dx !== -1) { dx = 1; dy = 0; }
+        const turn = (name) => {
+            const d = DIRS[name];
+            const last = queue.length ? queue[queue.length - 1] : dir;   // сравниваем с последним поворотом, а не с текущим
+            if (d[0] === -last[0] && d[1] === -last[1]) return;          // разворот на 180° запрещён
+            if (d[0] === last[0] && d[1] === last[1]) return;
+            if (queue.length < 2) queue.push(d);
             tg.HapticFeedback.impactOccurred('light');
         };
 
-        window.snakeKeydown = (e) => {
-            if (e.key === 'ArrowUp') window.snakeMove('up');
-            if (e.key === 'ArrowDown') window.snakeMove('down');
-            if (e.key === 'ArrowLeft') window.snakeMove('left');
-            if (e.key === 'ArrowRight') window.snakeMove('right');
+        const tick = () => {
+            if (queue.length) dir = queue.shift();
+            const head = { x: (snake[0].x + dir[0] + CELLS) % CELLS, y: (snake[0].y + dir[1] + CELLS) % CELLS };
+            const ate = head.x === food.x && head.y === food.y;
+            const body = ate ? snake : snake.slice(0, -1);   // хвост в этот ход освобождается
+            if (body.some((s) => s.x === head.x && s.y === head.y)) {
+                clearInterval(interval); over = true;
+                tg.HapticFeedback.notificationOccurred('error');
+                tg.showAlert('Змейка укусила себя! Пробуем ещё раз.', () => { if (!over) return; start(); });
+                return;
+            }
+            snake.unshift(head);
+            if (ate) {
+                score++;
+                tg.HapticFeedback.notificationOccurred('success');
+                timerEl.innerText = `🍎 ${score}/${target}`;
+                if (score >= target) { clearInterval(interval); over = false; draw(); onComplete(20); return; }
+                placeFood();
+            } else snake.pop();
+            draw();
         };
-        document.addEventListener('keydown', window.snakeKeydown);
+
+        const start = () => {
+            snake = [{ x: 10, y: 10 }]; score = 0; dir = [1, 0]; queue = []; over = false;
+            timerEl.innerText = `🍎 0/${target}`;
+            placeFood(); draw();
+            clearInterval(interval);
+            interval = setInterval(tick, 150);
+        };
+
+        container.querySelectorAll('[data-d]').forEach((b) => { b.onclick = () => turn(b.dataset.d); });
+        container.querySelector('#snake-restart').onclick = () => { over = false; start(); };
+
+        keyHandler = (e) => {
+            const map = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
+            if (map[e.key]) { e.preventDefault(); turn(map[e.key]); }
+        };
+        document.addEventListener('keydown', keyHandler);
+
+        // Свайпы по полю
+        let sx = 0, sy = 0;
+        canvas.addEventListener('touchstart', (e) => { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }, { passive: true });
+        canvas.addEventListener('touchmove', (e) => {
+            const dx = e.touches[0].clientX - sx, dy = e.touches[0].clientY - sy;
+            if (Math.max(Math.abs(dx), Math.abs(dy)) < 22) return;
+            turn(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up'));
+            sx = e.touches[0].clientX; sy = e.touches[0].clientY;
+        }, { passive: true });
+
+        start();
     },
+
     destroy() {
         clearInterval(interval);
-        document.removeEventListener('keydown', window.snakeKeydown);
-        delete window.snakeMove;
-    }
+        if (keyHandler) document.removeEventListener('keydown', keyHandler);
+        keyHandler = null;
+    },
 };
-
-function generateFood() {
-    food = { x: Math.floor(Math.random() * (canvas.width / gridSize)) * gridSize, y: Math.floor(Math.random() * (canvas.height / gridSize)) * gridSize };
-}
-
-function update(tg, onComplete, startGame) {
-    const head = {x: snake[0].x + dx * gridSize, y: snake[0].y + dy * gridSize};
-
-    // Телепорт
-    if (head.x < 0) head.x = canvas.width - gridSize;
-    if (head.x >= canvas.width) head.x = 0;
-    if (head.y < 0) head.y = canvas.height - gridSize;
-    if (head.y >= canvas.height) head.y = 0;
-
-    // Смерть об себя
-    if (snake.some(s => s.x === head.x && s.y === head.y)) {
-        clearInterval(interval);
-        tg.HapticFeedback.notificationOccurred('error');
-        tg.showAlert("Ты проиграл! Попробуй еще раз.", () => startGame());
-        return;
-    }
-
-    snake.unshift(head);
-    if (head.x === food.x && head.y === food.y) {
-        score++;
-        tg.HapticFeedback.notificationOccurred('success');
-        document.getElementById('quest-timer').innerText = `Яблок: ${score}/${targetApples}`;
-        generateFood();
-        if (score >= targetApples) {
-            clearInterval(interval);
-            onComplete(20); // 20 баллов
-            return;
-        }
-    } else { snake.pop(); }
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#ff4757';
-    ctx.beginPath(); ctx.arc(food.x + gridSize/2, food.y + gridSize/2, gridSize/2 - 1, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#1e90ff';
-    snake.forEach(s => ctx.fillRect(s.x, s.y, gridSize - 2, gridSize - 2));
-}

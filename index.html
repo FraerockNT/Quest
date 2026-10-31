@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Новогодние квесты</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link rel="stylesheet" href="/style.css?v=10">
+</head>
+<body>
+    <canvas id="snow"></canvas>
+    <div class="garland" id="garland" aria-hidden="true"></div>
+
+    <main class="app">
+        <!-- Главное меню -->
+        <section id="main-menu" class="screen">
+            <div class="row between">
+                <h1 class="title">Новогодний квест</h1>
+                <div class="row gap8">
+                    <button id="admin-new" class="icon-btn hidden" title="Создать комнату" onclick="window.app.newRoom()">➕</button>
+                </div>
+            </div>
+            <p class="subtitle" id="user-greeting">Привет!</p>
+
+            <div class="card join-card">
+                <div class="card-title">Войти в квест</div>
+                <input type="text" id="join-room-code" placeholder="Пароль комнаты" autocomplete="off">
+                <input type="text" id="join-team-name" placeholder="Название вашей команды" maxlength="24" autocomplete="off">
+                <button class="btn" onclick="window.app.joinRoom()">Войти</button>
+            </div>
+
+            <div id="quest-list"></div>
+        </section>
+
+        <!-- Комната (игрок) -->
+        <section id="room-screen" class="screen hidden">
+            <div class="screen-header">
+                <button class="back-btn" onclick="window.app.back()">← Назад</button>
+                <div class="timer" id="room-status"></div>
+            </div>
+            <h2 class="title" id="room-title"></h2>
+            <p class="subtitle" id="room-team"></p>
+
+            <div class="card code-card">
+                <div class="card-title">🔑 Код задания</div>
+                <div class="row gap8">
+                    <input type="text" id="unlock-code" inputmode="numeric" maxlength="7" placeholder="6 цифр" autocomplete="off">
+                    <button class="btn btn-auto" onclick="window.app.unlock()">Открыть</button>
+                </div>
+                <button class="btn btn-ghost hidden" id="scan-btn" onclick="window.app.scanQr()">📷 Сканировать QR-код</button>
+            </div>
+
+            <div id="room-map-box"></div>
+            <div id="room-tasks" class="stack"></div>
+
+            <div class="card">
+                <div class="card-title">🏆 Команды</div>
+                <div id="room-board"></div>
+            </div>
+        </section>
+
+        <!-- Экран задания -->
+        <section id="quest-container" class="screen hidden">
+            <div class="screen-header">
+                <button class="back-btn" onclick="window.app.back()">← К заданиям</button>
+                <div class="timer" id="quest-timer"></div>
+                <button class="hint-btn" id="hint-btn" onclick="window.app.hint()">💡</button>
+            </div>
+            <h2 class="title small" id="quest-title"></h2>
+            <div id="quest-content" class="quest-content"></div>
+        </section>
+
+        <!-- Админ: результаты комнаты -->
+        <section id="admin-room" class="screen hidden">
+            <div class="screen-header">
+                <button class="back-btn" onclick="window.app.back()">← Назад</button>
+                <div class="row gap8">
+                    <button class="icon-btn" onclick="window.app.editRoom()" title="Редактировать">✏️</button>
+                    <button class="icon-btn" onclick="window.app.deleteRoom()" title="Удалить">🗑</button>
+                </div>
+            </div>
+            <div id="admin-room-body"></div>
+        </section>
+
+        <!-- Админ: создание / редактирование -->
+        <section id="admin-edit" class="screen hidden">
+            <div class="screen-header">
+                <button class="back-btn" onclick="window.app.back()">← Назад</button>
+                <h2 class="title small">Комната</h2>
+            </div>
+            <div id="admin-form"></div>
+        </section>
+    </main>
+
+    <div id="modal" class="modal hidden">
+        <div class="modal-card">
+            <div id="modal-body"></div>
+            <button class="btn" onclick="window.app.closeModal()">Понятно</button>
+        </div>
+    </div>
+
+    <script type="module" src="/app.js?v=10"></script>
+</body>
+</html>

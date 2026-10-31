@@ -1,91 +1,70 @@
-let secretWord, maxAttempts, currentAttempt, wordLength;
+let dead = false;
 
 export default {
-    title: "📝 Слово дня",
-    description: "Угадай слово",
-    init(container, tg, onComplete, questConfig) {
-        secretWord = (questConfig.wordleWord || "КВЕСТ").toUpperCase();
-        wordLength = secretWord.length;
+    title: '📝 Слово дня',
+    description: 'Угадай загаданное слово',
+    maxScore: 50,
+    defaultHint: 'Зелёная буква стоит на своём месте, жёлтая есть в слове, но в другом месте, серой в слове нет. Слово связано с Новым годом.',
+    adminFields: [
+        { key: 'answer', label: 'Загаданное слово (русские буквы, до 13 букв)', type: 'text', def: 'ЁЛОЧКА' },
+    ],
 
-        // Логика попыток
-        if (wordLength <= 6) maxAttempts = 5;
-        else if (wordLength <= 9) maxAttempts = 7;
-        else if (wordLength <= 12) maxAttempts = 9;
-        else maxAttempts = 10;
+    init(container, tg, onComplete, cfg = {}) {
+        dead = false;
+        const length = cfg.progress?.length || 5;
+        const max = cfg.progress?.max || 5;
+        const guesses = (cfg.progress?.guesses || []).map((g) => ({ word: g.w, marks: g.m }));
+        const timerEl = document.getElementById('quest-timer');
+        let busy = false;
 
-        currentAttempt = 0;
-        let guesses = [];
+        container.innerHTML = `
+            <p class="note">Слово из ${length} букв. Попыток: ${max}. Они сохраняются, даже если выйти из задания.</p>
+            <div id="wordle-board" class="stack" style="gap:5px"></div>
+            <div class="row gap8">
+                <input type="text" id="wordle-input" maxlength="${length}" placeholder="Слово" autocomplete="off" style="text-transform:uppercase;">
+                <button class="btn btn-auto" id="wordle-submit">Ввод</button>
+            </div>`;
+        const board = container.querySelector('#wordle-board');
+        const input = container.querySelector('#wordle-input');
 
-        document.getElementById('quest-timer').innerText = `0/${maxAttempts}`;
-
-        const renderBoard = () => {
-            container.innerHTML = `
-                <div style="display:flex; flex-direction:column; gap:5px; margin-bottom:20px;" id="wordle-board"></div>
-                <div style="display:flex; gap:5px;">
-                    <input type="text" id="wordle-input" maxlength="${wordLength}" placeholder="Слово" style="flex:1; padding:10px; font-size:18px; text-transform:uppercase; border-radius:8px; border:1px solid #ccc;">
-                    <button class="btn" id="wordle-submit" style="width: auto; margin:0;">Ввод</button>
-                </div>
-            `;
-
-            const board = document.getElementById('wordle-board');
-
-            // Рисуем предыдущие попытки
-            guesses.forEach(guess => {
-                let rowHtml = `<div style="display:flex; gap:5px; justify-content:center;">`;
-                for (let i = 0; i < wordLength; i++) {
-                    let color = "#ccc"; // Серый по умолчанию
-                    if (guess.word[i] === secretWord[i]) color = "#2ed573"; // Зеленый (на своем месте)
-                    else if (secretWord.includes(guess.word[i])) color = "#eccc68"; // Желтый (есть в слове)
-
-                    rowHtml += `<div style="width:40px; height:40px; background:${color}; border-radius:5px; display:flex; align-items:center; justify-content:center; font-weight:bold; color:white;">${guess.word[i]}</div>`;
-                }
-                rowHtml += `</div>`;
-                board.innerHTML += rowHtml;
+        const render = () => {
+            timerEl.innerText = `${guesses.length}/${max}`;
+            let html = '';
+            guesses.forEach((g) => {
+                html += `<div class="wordle-row">${[...g.word].map((ch, i) => `<div class="wcell m${g.marks[i]}">${ch}</div>`).join('')}</div>`;
             });
-
-            // Рисуем пустые строки
-            for (let i = guesses.length; i < maxAttempts; i++) {
-                let rowHtml = `<div style="display:flex; gap:5px; justify-content:center; opacity:0.3;">`;
-                for (let j = 0; j < wordLength; j++) {
-                    rowHtml += `<div style="width:40px; height:40px; border:1px solid #999; border-radius:5px; display:flex; align-items:center; justify-content:center; font-weight:bold;"></div>`;
-                }
-                rowHtml += `</div>`;
-                board.innerHTML += rowHtml;
+            for (let i = guesses.length; i < max; i++) {
+                html += `<div class="wordle-row">${'<div class="wcell empty"></div>'.repeat(length)}</div>`;
             }
-
-            const input = document.getElementById('wordle-input');
-            const submit = document.getElementById('wordle-submit');
-
-            const checkWord = () => {
-                const word = input.value.toUpperCase();
-                if (word.length !== wordLength) return tg.showAlert(`Слово должно быть из ${wordLength} букв`);
-
-                guesses.push({ word });
-                currentAttempt++;
-                document.getElementById('quest-timer').innerText = `${currentAttempt}/${maxAttempts}`;
-                tg.HapticFeedback.impactOccurred('light');
-
-                if (word === secretWord) {
-                    tg.HapticFeedback.notificationOccurred('success');
-                    onComplete(50); // 50 баллов за победу
-                    return;
-                }
-
-                if (currentAttempt >= maxAttempts) {
-                    tg.HapticFeedback.notificationOccurred('error');
-                    tg.showAlert(`Не угадал! Было слово: ${secretWord}`);
-                    onComplete(0); // 0 баллов
-                    return;
-                }
-
-                input.value = '';
-                renderBoard();
-            };
-            submit.onclick = checkWord;
-            input.onkeydown = (e) => { if (e.key === 'Enter') checkWord(); };
+            board.innerHTML = html;
         };
 
-        renderBoard();
-        this.destroy = () => {};
-    }
+        const submit = async () => {
+            if (busy || dead) return;
+            const word = input.value.trim();
+            if (word.length !== length) return tg.showAlert(`Нужно слово из ${length} букв`);
+            busy = true;
+            try {
+                const r = await cfg.check(word);       // сервер сам сравнивает со словом, на телефон оно не попадает
+                guesses.push({ word: r.word, marks: r.marks });
+                input.value = '';
+                tg.HapticFeedback.impactOccurred('light');
+                render();
+                if (r.ok) { tg.HapticFeedback.notificationOccurred('success'); onComplete(50); }
+                else if (r.over) { tg.HapticFeedback.notificationOccurred('error'); onComplete(0); }
+            } catch (e) { tg.showAlert(e.message); }
+            busy = false;
+        };
+
+        render();
+        // Если игрок вышел в самый последний момент — доводим задание до конца
+        const last = guesses[guesses.length - 1];
+        if (last && last.marks.every((m) => m === 2)) return onComplete(50);
+        if (guesses.length >= max) return onComplete(0);
+
+        container.querySelector('#wordle-submit').onclick = submit;
+        input.onkeydown = (e) => { if (e.key === 'Enter') submit(); };
+    },
+
+    destroy() { dead = true; },
 };
