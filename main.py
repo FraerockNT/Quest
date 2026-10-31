@@ -19,7 +19,7 @@ HTML_PAGE = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Квесты</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <link rel="stylesheet" href="/style.css?v=7">
+    <link rel="stylesheet" href="/style.css?v=8">
 </head>
 <body>
     <!-- Главное меню -->
@@ -100,7 +100,7 @@ HTML_PAGE = """
     </div>
 
     <script>window.ADMIN_ID = 5237959867;</script>
-    <script type="module" src="/app.js?v=7"></script>
+    <script type="module" src="/app.js?v=8"></script>
 </body>
 </html>
 """

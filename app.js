@@ -1,17 +1,18 @@
-import hanoiQuest from './quests/hanoi.js?v=7';
-import snakeQuest from './quests/snake.js?v=7';
-import quizQuest from './quests/quiz.js?v=7';
-import mathQuest from './quests/math.js?v=7';
-import wordleQuest from './quests/wordle.js?v=7';
-import lockQuest from './quests/lock.js?v=7';
-
+import hanoiQuest from './quests/hanoi.js?v=8';
+import snakeQuest from './quests/snake.js?v=8';
+import quizQuest from './quests/quiz.js?v=8';
+import mathQuest from './quests/math.js?v=8';
+import wordleQuest from './quests/wordle.js?v=8';
+import lockQuest from './quests/lock.js?v=8';
+import matchQuest from './quests/match.js?v=8';
 const tg = window.Telegram.WebApp;
 tg.ready();
 tg.expand();
 
 const ALL_QUESTS = {
     hanoi: hanoiQuest, snake: snakeQuest, quiz: quizQuest,
-    math: mathQuest, wordle: wordleQuest, lock: lockQuest
+    math: mathQuest, wordle: wordleQuest, lock: lockQuest,
+    match: matchQuest // НОВАЯ ИГРА В СПИСКЕ
 };
 let activeQuest = null;
 let currentRoom = null;
