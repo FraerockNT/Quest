@@ -1,17 +1,24 @@
-import { startSnow } from './snow.js?v=10';
-import hanoi from './quests/hanoi.js?v=10';
-import snake from './quests/snake.js?v=10';
-import quiz from './quests/quiz.js?v=10';
-import math from './quests/math.js?v=10';
-import wordle from './quests/wordle.js?v=10';
-import lock from './quests/lock.js?v=10';
-import match from './quests/match.js?v=10';
-import simon from './quests/simon.js?v=10';
-import memory from './quests/memory.js?v=10';
-import slide from './quests/slide.js?v=10';
-import riddle from './quests/riddle.js?v=10';
+import { startSnow } from './snow.js?v=11';
+// Задания подключаются по одному: если какого-то файла нет, остальное приложение всё равно работает
+const FILES = { hanoi: 'hanoi', snake: 'snake', quiz: 'quiz', math: 'math', wordle: 'wordle', lock: 'lock', match: 'match',
+    simon: 'simon', memory: 'memory', slide: 'slide', riddle: 'riddle', lights: 'lights', catch: 'catch' };
+const QUESTS = {};
+const missing = [];
+await Promise.all(Object.entries(FILES).map(async ([key, file]) => {
+    try { QUESTS[key] = (await import(`./quests/${file}.js?v=11`)).default; }
+    catch (e) { missing.push(`${file}.js (${e.message})`); }
+}));
 
-const QUESTS = { hanoi, snake, quiz, math, wordle, lock, match, simon, memory, slide, riddle };
+// Любая ошибка выводится на экран, а не пропадает молча
+function bootError(text) {
+    const box = document.getElementById('boot-error');
+    if (!box) return;
+    box.classList.remove('hidden');
+    box.innerText += (box.innerText ? '\n' : '') + text;
+}
+window.addEventListener('error', (e) => bootError('Ошибка: ' + e.message));
+window.addEventListener('unhandledrejection', (e) => bootError('Ошибка: ' + (e.reason?.message || e.reason)));
+if (missing.length) bootError('Не загрузились файлы заданий: ' + missing.join('; ') + '. Загрузите их в папку quests/ на сервер.');
 
 // В обычном браузере (для проверки) подставляем «заглушку» Telegram. ?as=123 — зайти как игрок 123.
 const tg = window.Telegram?.WebApp?.initData ? window.Telegram.WebApp : {
@@ -106,6 +113,7 @@ async function renderMenu() {
     const user = tg.initDataUnsafe?.user;
     $('user-greeting').innerText = `${me.admin ? 'Привет, админ' : 'Привет'}, ${user?.first_name || 'друг'}! ❄️`;
     $('admin-new').classList.toggle('hidden', !me.admin);
+    $('my-id').innerText = `Ваш Telegram ID: ${me.id}${me.admin ? ' · админ' : ''}`;
     list.innerHTML = '';
     if (!me.rooms.length) {
         list.innerHTML = '<p class="muted center">Пока нет комнат. Введи пароль выше — и в путь!</p>';
@@ -174,7 +182,7 @@ function renderRoom() {
         if (t.state === 'new') { name = 'Задание ещё не найдено'; sub = 'Найди код на локации'; right = '🔒'; }
         else {
             name = taskTitle(t);
-            if (t.state === 'found') { sub = 'Код введён'; right = '▶ Играть'; }
+            if (t.state === 'found') { sub = `Код введён · до ${t.points} б.`; right = '▶ Играть'; }
             else {
                 right = `${t.score} б.`;
                 sub = t.state === 'failed' ? 'Не получилось' : t.penalty ? `💡 подсказка: −${t.penalty}` : 'Выполнено';
@@ -217,17 +225,21 @@ async function startTask(taskId) {
     await safe(async () => {
         const info = await api('task_open', { roomId: room.id, taskId });
         const quest = QUESTS[info.type];
+        if (!quest) return tg.showAlert('Этот тип задания не загружен или удалён. Сообщите админу.');
         active = { quest, taskId, hintUsed: info.hintUsed, penalty: info.penalty, max: info.max, finished: false, adminHint: null };
 
         show('quest-container');
         $('quest-title').innerText = info.title || quest.title;
         $('quest-timer').innerText = '';
         $('quest-content').innerHTML = '';
+        $('quest-sub').innerText = `Баллов за задание: до ${info.max} · подсказка −${info.penalty}`;
         updateHintBtn();
 
         const cfg = {
             ...info.cfg,
             progress: info.progress,
+            points: info.max,
+            image: info.image,
             saveProgress: (p) => api('progress', { roomId: room.id, taskId, progress: p }).catch(() => {}),
             check: (answer) => api('check', { roomId: room.id, taskId, answer }),
             useHint: () => takeHint(false),
@@ -239,7 +251,7 @@ async function startTask(taskId) {
 function updateHintBtn() {
     const b = $('hint-btn');
     b.classList.toggle('used', !!active?.hintUsed);
-    b.innerText = active?.hintUsed ? '💡 Взята' : `💡 −${active?.penalty ?? ''}`;
+    b.innerText = active?.hintUsed ? '💡 Подсказка ✓' : '💡 Подсказка';
 }
 
 // Подсказка: первый раз стоит баллов (спрашиваем), потом запоминается и смотреть можно бесплатно
@@ -295,7 +307,7 @@ async function openAdminRoom(id) {
             <h2 class="title">${esc(r.name)}</h2>
             <p class="subtitle">Пароль: <b>${esc(r.password)}</b> · ${new Date(r.start).toLocaleString('ru')} — ${new Date(r.end).toLocaleString('ru')}</p>
             <div class="card"><div class="card-title">🔑 Коды заданий (спрячь их на локации)</div>
-                ${tasks.map((t) => `<div class="board-row"><span>${t.n}. ${esc(taskTitle(t))}</span><span class="code-pill">${t.code}</span></div>`).join('')}
+                ${tasks.map((t) => `<div class="board-row"><span>${t.n}. ${esc(taskTitle(t))} <span class="muted">(${t.points || QUESTS[t.type].defaultPoints} б.)</span></span><span class="code-pill">${t.code}</span></div>`).join('')}
             </div>
             ${mapHtml(tasks, r.map, () => 'blue', false)}
             <div class="card"><div class="card-title">🏆 Команды (${r.teams.length})</div>
@@ -327,15 +339,21 @@ function newRoom() {
 }
 function editRoom() {
     edit = JSON.parse(JSON.stringify(adminRoom)); edit.placing = null;
+    edit.tasks.forEach((t) => { if (!t.hint && QUESTS[t.type]) t.hint = QUESTS[t.type].adminHint ?? QUESTS[t.type].defaultHint ?? ''; });
     renderEdit(); show('admin-edit');
 }
 
-function fieldHtml(f, value, ti) {
+function fieldHtml(f, value, ti, cfg = {}) {
     const attr = `data-ti="${ti}" data-cfg="${f.key}"`;
     const v = value ?? f.def ?? '';
-    if (f.type === 'textarea') return `<label class="field">${esc(f.label)}<textarea ${attr}>${esc(v)}</textarea></label>`;
-    if (f.type === 'number') return `<label class="field">${esc(f.label)}<input type="number" ${attr} value="${esc(v)}" min="${f.min ?? ''}" max="${f.max ?? ''}"></label>`;
-    return `<label class="field">${esc(f.label)}<input type="text" ${attr} value="${esc(v)}"></label>`;
+    const note = f.note ? `<span class="muted">${esc(f.note(cfg))}</span>` : '';
+    if (f.type === 'select') {
+        const opts = f.options.map(([k, l]) => `<option value="${k}" ${String(v) === k ? 'selected' : ''}>${esc(l)}</option>`).join('');
+        return `<label class="field">${esc(f.label)}<select ${attr}>${opts}</select>${note}</label>`;
+    }
+    if (f.type === 'textarea') return `<label class="field">${esc(f.label)}<textarea ${attr}>${esc(v)}</textarea>${note}</label>`;
+    if (f.type === 'number') return `<label class="field">${esc(f.label)}<input type="number" ${attr} value="${esc(v)}" min="${f.min ?? ''}" max="${f.max ?? ''}">${note}</label>`;
+    return `<label class="field">${esc(f.label)}<input type="text" ${attr} value="${esc(v)}">${note}</label>`;
 }
 
 function renderEdit() {
@@ -349,8 +367,12 @@ function renderEdit() {
             <label class="field">6-значный код (его прячешь на локации)
                 <div class="row gap8"><input type="text" inputmode="numeric" maxlength="6" data-ti="${i}" data-f="code" value="${esc(t.code)}">
                 <button class="icon-btn" data-act="dice" data-ti="${i}">🎲</button></div></label>
-            ${(q.adminFields || []).map((f) => fieldHtml(f, t.cfg?.[f.key], i)).join('')}
-            <label class="field">Своя подсказка (если пусто — стандартная)<textarea data-ti="${i}" data-f="hint" maxlength="600">${esc(t.hint || '')}</textarea></label>
+            <label class="field">Баллов за задание<input type="number" data-ti="${i}" data-f="points" value="${t.points || q.defaultPoints}" min="1" max="500"></label>
+            ${(q.adminFields || []).map((f) => fieldHtml(f, t.cfg?.[f.key], i, t.cfg || {})).join('')}
+            ${t.type === 'riddle' ? `<div class="field">Фото к загадке (необязательно)
+                <input type="file" accept="image/*" data-img="${i}">
+                ${t.image ? `<img src="${t.image}" style="max-width:100%;border-radius:10px"><button class="btn btn-ghost btn-small" data-act="delimg" data-ti="${i}">Убрать фото</button>` : ''}</div>` : ''}
+            <label class="field">Подсказка для игроков (стандартная уже вписана, можно изменить)<textarea data-ti="${i}" data-f="hint" maxlength="600">${esc(t.hint || '')}</textarea></label>
             ${e.map ? `<button class="btn btn-ghost btn-small" data-act="place" data-ti="${i}">${t.x != null ? '📍 Передвинуть точку на карте' : '📍 Поставить точку на карте'}</button>` : ''}
         </div>`;
     }).join('');
@@ -402,9 +424,10 @@ async function onEditClick(ev) {
         const act = btn.dataset.act, i = +btn.dataset.ti;
         if (act === 'add') {
             const type = $('new-type').value;
-            const t = { id: '', type, code: randCode(), title: '', hint: '', x: null, y: null, cfg: {} };
-            collectCfg(t, QUESTS[type]); edit.tasks.push(t); renderEdit();
+            const t = { id: '', type, code: randCode(), title: '', hint: '', x: null, y: null, points: QUESTS[type].defaultPoints, image: '', cfg: {} };
+            collectCfg(t, QUESTS[type]); QUESTS[type].normalizeCfg?.(t.cfg); t.hint = QUESTS[type].adminHint ?? QUESTS[type].defaultHint ?? ''; edit.tasks.push(t); renderEdit();
         } else if (act === 'del') { edit.tasks.splice(i, 1); edit.placing = null; renderEdit(); }
+        else if (act === 'delimg') { edit.tasks[i].image = ''; renderEdit(); }
         else if (act === 'dice') { edit.tasks[i].code = randCode(); renderEdit(); }
         else if (act === 'place') { edit.placing = i; renderEdit(); $('edit-map')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
         else if (act === 'delmap') { edit.map = ''; edit.tasks.forEach((t) => { t.x = t.y = null; }); edit.placing = null; renderEdit(); }
@@ -421,27 +444,28 @@ async function onEditClick(ev) {
     }
 }
 
-// Уменьшаем фото карты, чтобы оно было лёгким (до ~1000 px)
-function loadMap(file) {
+// Уменьшаем фото, чтобы оно было лёгким
+function loadImage(file, done, maxSide = 1000, quality = 0.72) {
     const img = new Image();
     img.onload = () => {
-        const k = Math.min(1, 1000 / Math.max(img.width, img.height));
+        const k = Math.min(1, maxSide / Math.max(img.width, img.height));
         const c = document.createElement('canvas');
         c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
         c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-        edit.map = c.toDataURL('image/jpeg', 0.72);
         URL.revokeObjectURL(img.src);
-        renderEdit();
+        done(c.toDataURL('image/jpeg', quality));
     };
     img.onerror = () => tg.showAlert('Не удалось открыть картинку');
     img.src = URL.createObjectURL(file);
 }
+function loadMap(file) { loadImage(file, (url) => { edit.map = url; renderEdit(); }); }
 
 async function saveRoom() {
     const e = edit;
     if (!e.password.trim()) return tg.showAlert('Придумай пароль для входа');
     if (!e.tasks.length) return tg.showAlert('Добавь хотя бы одно задание');
     if (!(e.start > 0 && e.end > e.start)) return tg.showAlert('Проверь даты: конец должен быть позже начала');
+    e.tasks.forEach((t) => QUESTS[t.type].normalizeCfg?.(t.cfg));
     const codes = e.tasks.map((t) => t.code);
     if (codes.some((c) => !/^\d{6}$/.test(c))) return tg.showAlert('Каждый код должен состоять из 6 цифр');
     if (new Set(codes).size !== codes.length) return tg.showAlert('Коды заданий не должны повторяться');
@@ -464,7 +488,15 @@ async function back() {
 }
 
 document.addEventListener('input', (ev) => { if (screen === 'admin-edit') onEditInput(ev); });
-document.addEventListener('change', (ev) => { if (ev.target.id === 'map-file' && ev.target.files[0]) loadMap(ev.target.files[0]); });
+document.addEventListener('change', (ev) => {
+    const el = ev.target;
+    if (el.id === 'map-file' && el.files[0]) return loadMap(el.files[0]);
+    if (el.dataset?.img !== undefined && el.files[0]) return loadImage(el.files[0], (url) => { edit.tasks[+el.dataset.img].image = url; renderEdit(); });
+    if (screen === 'admin-edit' && el.dataset?.cfg !== undefined) {
+        const t = edit.tasks[+el.dataset.ti];
+        if (QUESTS[t.type].normalizeCfg) { QUESTS[t.type].normalizeCfg(t.cfg); renderEdit(); }
+    }
+});
 document.addEventListener('click', (ev) => { if (screen === 'admin-edit') onEditClick(ev); });
 
 window.app = { back, joinRoom, unlock: () => unlock(), scanQr, hint: () => takeHint(true), newRoom, editRoom, deleteRoom, closeModal };
