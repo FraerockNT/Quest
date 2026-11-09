@@ -1,11 +1,11 @@
-import { startSnow } from './snow.js?v=11';
+import { startSnow } from './snow.js?v=13';
 // Задания подключаются по одному: если какого-то файла нет, остальное приложение всё равно работает
 const FILES = { hanoi: 'hanoi', snake: 'snake', quiz: 'quiz', math: 'math', wordle: 'wordle', lock: 'lock', match: 'match',
-    simon: 'simon', memory: 'memory', slide: 'slide', riddle: 'riddle', lights: 'lights', catch: 'catch' };
+    simon: 'simon', memory: 'memory', slide: 'slide', riddle: 'riddle', lights: 'lights', balls: 'balls' };
 const QUESTS = {};
 const missing = [];
 await Promise.all(Object.entries(FILES).map(async ([key, file]) => {
-    try { QUESTS[key] = (await import(`./quests/${file}.js?v=11`)).default; }
+    try { QUESTS[key] = (await import(`./quests/${file}.js?v=13`)).default; }
     catch (e) { missing.push(`${file}.js (${e.message})`); }
 }));
 
@@ -287,12 +287,16 @@ async function finishTask(raw) {
         () => leaveQuest());
 }
 
+let leaving = false;
 async function leaveQuest() {
-    if (active?.quest.destroy) active.quest.destroy();
+    if (leaving) return;
+    leaving = true;
+    try { active?.quest.destroy?.(); } catch (e) {}     // ошибка в задании не должна мешать выйти
     active = null;
-    room = await api('room', { roomId: room.id }).catch(() => room);
-    show('room-screen'); renderRoom();
+    show('room-screen'); renderRoom();                    // комната появляется сразу, данные обновятся следом
     refreshTimer = setInterval(refreshRoom, 12000);
+    leaving = false;
+    try { room = await api('room', { roomId: room.id }); renderRoom(); } catch (e) {}
 }
 
 // ───────────── Админ: просмотр комнаты ─────────────
@@ -480,7 +484,9 @@ async function saveRoom() {
 // ───────────── Кнопка «Назад» ─────────────
 async function back() {
     if (screen === 'quest-container') {
-        if (active && !active.finished && !(await confirmP('Выйти из задания? Прогресс сохранится только у заданий с попытками.'))) return;
+        // Спрашиваем только там, где выход что-то стоит (например, открытый вопрос викторины)
+        const warn = active && !active.finished ? active.quest.leaveWarning?.() : '';
+        if (warn && !(await confirmP(warn))) return;
         return leaveQuest();
     }
     if (screen === 'admin-edit') return edit.id ? show('admin-room') : renderMenu();
@@ -500,4 +506,6 @@ document.addEventListener('change', (ev) => {
 document.addEventListener('click', (ev) => { if (screen === 'admin-edit') onEditClick(ev); });
 
 window.app = { back, joinRoom, unlock: () => unlock(), scanQr, hint: () => takeHint(true), newRoom, editRoom, deleteRoom, closeModal };
-window.onload = init;
+// Запускаем сразу: раньше запуск ждал события загрузки страницы, а оно могло случиться раньше,
+// чем подгрузятся файлы заданий, и тогда приложение просто не стартовало.
+init().catch((e) => bootError('Ошибка запуска: ' + (e?.message || e)));
