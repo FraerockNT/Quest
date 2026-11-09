@@ -1,11 +1,11 @@
-import { QUESTIONS } from './quizdata.js?v=11';
+import { QUESTIONS } from './quizdata.js?v=13';
 
 const LEVELS = { easy: ['e'], medium: ['m'], hard: ['h'], mixed: ['e', 'm', 'h'] };
 // Итог викторины по 1000 очков переводится в долю баллов задания
 const BANDS = [[900, 1], [750, 0.8], [600, 0.6], [450, 0.4], [300, 0.25], [1, 0.1]];
 const bandOf = (total) => (BANDS.find(([min]) => total >= min) || [0, 0])[1];
 
-let timer, alive = false, saveNow = () => {};
+let timer, alive = false, saveNow = () => {}, inQuestion = false;
 
 const shuffle = (arr) => { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 const num = (v, d) => { v = Number(v); return Number.isFinite(v) ? Math.round(v) : d; };
@@ -16,6 +16,7 @@ export default {
     defaultPoints: 40,
     defaultHint: 'Не жди до последней секунды: быстрый ответ даёт больше очков. Если не уверен, убери два лишних варианта кнопкой 50/50.',
     QUESTION_COUNT: QUESTIONS.length,   // для проверки
+    leaveWarning: () => (inQuestion ? 'Если выйти сейчас, текущий вопрос засчитается неверным. Выйти?' : ''),
     adminFields: [
         { key: 'difficulty', label: 'Сложность вопросов', type: 'select', def: 'mixed',
           options: [['easy', 'Лёгкие'], ['medium', 'Средние'], ['hard', 'Сложные'], ['mixed', 'Все вперемешку']] },
@@ -30,12 +31,15 @@ export default {
         const prog = cfg.progress || {};
 
         // Вопросы выбираются случайно ОДИН раз для команды и сохраняются
-        let questions = prog.questions;
-        if (!questions) {
-            const pool = QUESTIONS.filter((q) => (LEVELS[cfg.difficulty] || LEVELS.mixed).includes(q[5]));
-            const count = Math.min(pool.length, Math.min(30, Math.max(3, num(cfg.quizCount, 10))));
-            questions = shuffle(pool).slice(0, count).map(([q, right, a, b, c]) => ({ q, answer: right, options: shuffle([right, a, b, c]) }));
-        }
+        const pool = QUESTIONS.filter((q) => (LEVELS[cfg.difficulty] || LEVELS.mixed).includes(q[5]));
+        const count = Math.min(pool.length, Math.min(30, Math.max(3, num(cfg.quizCount, 10))));
+        // Новый набор: сначала берём вопросы, которых ещё не было, потом добираем остальные
+        const pickQuestions = (avoid = []) => {
+            const fresh = shuffle(pool.filter((q) => !avoid.includes(q[0])));
+            const rest = shuffle(pool.filter((q) => avoid.includes(q[0])));
+            return [...fresh, ...rest].slice(0, count).map(([q, right, a, b, c]) => ({ q, answer: right, options: shuffle([right, a, b, c]) }));
+        };
+        let questions = prog.questions || pickQuestions();
         const total = questions.length, base = 1000 / total;
         const pts = prog.pts || [];
         let idx = prog.idx || 0, pending = prog.pending ?? -1, notice = false;
@@ -50,19 +54,27 @@ export default {
             clearInterval(timer);
             const score = sum(), ratio = bandOf(score);
             timerEl.innerText = '';
+            inQuestion = false;
             container.innerHTML = `
                 <div class="card center"><div class="muted">Твой результат</div>
                     <div class="big-score">${score} / 1000</div>
                     <div>${ratio === 1 ? 'Отлично! Все баллы за задание твои.' : ratio > 0 ? `Ты получаешь ${Math.round(ratio * 100)}% баллов за задание.` : 'В этот раз без баллов.'}</div></div>
-                <button class="btn" id="quiz-done">Забрать баллы</button>`;
+                <button class="btn" id="quiz-done">Забрать баллы</button>
+                <button class="btn btn-ghost" id="quiz-retry">Попробовать заново</button>`;
             container.querySelector('#quiz-done').onclick = () => { alive = false; onComplete(ratio); };
+            // Заново: текущие очки сгорают, вопросы берутся другие и перемешиваются
+            container.querySelector('#quiz-retry').onclick = () => {
+                questions = pickQuestions(questions.map((x) => x.q));
+                pts.length = 0; idx = 0; pending = -1; saveNow();
+                show();
+            };
         };
 
         const show = () => {
             if (!alive) return;
             if (idx >= total) return finish();
             const cur = questions[idx];
-            pending = idx; saveNow();
+            pending = idx; inQuestion = true; saveNow();
             container.innerHTML = `
                 <div class="qbar"><i id="qbar"></i></div>
                 <p class="note">Вопрос ${idx + 1} из ${total} · счёт: <b>${sum()}</b> из 1000</p>
@@ -77,7 +89,7 @@ export default {
             let answered = false;
 
             const reveal = (chosen, earned) => {
-                answered = true; clearInterval(timer);
+                answered = true; inQuestion = false; clearInterval(timer);
                 [...box.children].forEach((el) => {
                     if (el.innerText === cur.answer) el.classList.add('correct');
                     else if (el.innerText === chosen) el.classList.add('wrong');
@@ -126,5 +138,5 @@ export default {
         else show();
     },
 
-    destroy() { if (alive) saveNow(); alive = false; clearInterval(timer); },
+    destroy() { if (alive) saveNow(); alive = false; inQuestion = false; clearInterval(timer); },
 };
