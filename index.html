@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Новогодние квесты</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <link rel="stylesheet" href="/style.css?v=11">
+    <link rel="stylesheet" href="/style.css?v=13">
 </head>
 <body>
     <canvas id="snow"></canvas>
@@ -26,6 +26,7 @@
                 <div class="card-title">Войти в квест</div>
                 <input type="text" id="join-room-code" placeholder="Пароль комнаты" autocomplete="off">
                 <input type="text" id="join-team-name" placeholder="Название вашей команды" maxlength="24" autocomplete="off">
+                <p class="muted">Введёшь другое название — перейдёшь в другую команду.</p>
                 <button class="btn" onclick="window.app.joinRoom()">Войти</button>
             </div>
 
@@ -101,6 +102,6 @@
         </div>
     </div>
 
-    <script type="module" src="/app.js?v=11"></script>
+    <script type="module" src="/app.js?v=13"></script>
 </body>
 </html>
