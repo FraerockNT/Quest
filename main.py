@@ -31,12 +31,15 @@ DATA_FILE = DATA_DIR / "db.json"
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("quest")
 
-# Максимум баллов за каждый тип задания (сервер не даст больше)
-TASK_MAX = {
+# Баллы за задание по умолчанию; админ может поставить свои для каждого задания
+DEFAULT_POINTS = {
     "hanoi": 30, "snake": 20, "quiz": 20, "math": 50, "wordle": 50, "lock": 40,
-    "match": 30, "simon": 30, "memory": 30, "slide": 40, "riddle": 40,
+    "match": 30, "simon": 30, "memory": 30, "slide": 40, "riddle": 40, "catch": 30, "lights": 40,
 }
-HINT_RATE = 0.3  # подсказка стоит 30% от максимума за задание
+HINT_RATE = 0.3  # подсказка стоит 30% от баллов за задание
+DIFFS = ("easy", "medium", "hard")
+RIDDLE_PENALTY = {"easy": 0.10, "medium": 0.18, "hard": 0.25}   # сколько отнимает каждая ошибка
+RIDDLE_COOLDOWN = {"easy": 20, "medium": 45, "hard": 90}        # пауза после каждых 3 ошибок, сек
 PRIVATE_CFG = {"answer"}  # эти поля настроек никогда не отправляются участникам
 
 DB = {"rooms": {}}
@@ -145,8 +148,21 @@ def check_open(room):
         raise ApiError("Время квеста истекло")
 
 
-def hint_penalty(ttype):
-    return math.ceil(TASK_MAX[ttype] * HINT_RATE)
+def task_points(task):
+    try:
+        p = int(task.get("points") or 0)
+    except (TypeError, ValueError):
+        p = 0
+    return min(500, max(1, p)) if p else DEFAULT_POINTS[task["type"]]
+
+
+def hint_penalty(task):
+    return math.ceil(task_points(task) * HINT_RATE)
+
+
+def diff_of(task):
+    d = task.get("cfg", {}).get("difficulty", "medium")
+    return d if d in DIFFS else "medium"
 
 
 def team_total(team):
@@ -161,8 +177,29 @@ def norm_word(s):
     return "".join(ch for ch in str(s).upper().replace("Ё", "Е") if ch.isalpha())
 
 
-def wordle_attempts(n):
-    return 5 if n <= 6 else 7 if n <= 9 else 9 if n <= 12 else 10
+def wordle_attempts(n, diff="medium"):
+    base = 5 if n <= 6 else 7 if n <= 9 else 9 if n <= 12 else 10
+    return max(4, base + {"easy": 2, "medium": 0, "hard": -1}.get(diff, 0))
+
+
+def normalize_cfg(ttype, cfg):
+    """Приводим настройки к допустимым значениям (например, лимит ходов Ханоя не меньше 2^n − 1)."""
+    if ttype == "hanoi":
+        try:
+            d = min(6, max(3, int(cfg.get("hanoiDisks", 3))))
+        except (TypeError, ValueError):
+            d = 3
+        low = 2 ** d - 1
+        try:
+            mn = max(low, int(cfg.get("hanoiMin", low)))
+        except (TypeError, ValueError):
+            mn = low
+        try:
+            mx = max(mn, int(cfg.get("hanoiMax", mn + 5)))
+        except (TypeError, ValueError):
+            mx = mn + 5
+        cfg.update(hanoiDisks=d, hanoiMin=mn, hanoiMax=mx)
+    return cfg
 
 
 def wordle_marks(guess, secret):
@@ -207,7 +244,7 @@ def h_me(user, b):
             rooms.append({"id": r["id"], "name": r["name"], "start": r["start"], "end": r["end"],
                           "joined": joined, "team": team["name"] if team else ""})
     rooms.sort(key=lambda x: x["start"], reverse=True)
-    return {"admin": admin, "rooms": rooms, "now": now_ms()}
+    return {"admin": admin, "id": user["id"], "rooms": rooms, "now": now_ms()}
 
 
 @handler("join")
@@ -249,7 +286,8 @@ def h_room(user, b):
             item["type"] = t["type"]
             item["title"] = t.get("title", "")
             item["hint"] = bool(tt.get("hint"))
-            item["penaltyValue"] = hint_penalty(t["type"])
+            item["points"] = task_points(t)
+            item["penaltyValue"] = hint_penalty(t)
         if tt.get("solved"):
             item["score"] = tt.get("score", 0)
             item["penalty"] = tt.get("penalty", 0)
@@ -304,10 +342,12 @@ def h_task_open(user, b):
         secret = norm_word(task["cfg"].get("answer", "КВЕСТ")) or "КВЕСТ"
         progress["guesses"] = tt.get("guesses", [])
         progress["length"] = len(secret)
-        progress["max"] = wordle_attempts(len(secret))
+        progress["max"] = wordle_attempts(len(secret), diff_of(task))
+    if task["type"] == "riddle":
+        progress["wait"] = max(0, int((tt.get("lock_until", 0) - now_ms()) / 1000))
     return {"type": task["type"], "title": task.get("title", ""), "cfg": cfg, "progress": progress,
-            "hintUsed": bool(tt.get("hint")), "penalty": hint_penalty(task["type"]),
-            "max": TASK_MAX[task["type"]]}
+            "hintUsed": bool(tt.get("hint")), "penalty": hint_penalty(task),
+            "max": task_points(task), "image": task.get("image", "")}
 
 
 @handler("progress")
@@ -319,7 +359,7 @@ def h_progress(user, b):
     if not tt or not tt.get("found") or tt.get("solved"):
         raise ApiError("Нельзя сохранить прогресс")
     data = b.get("progress")
-    if not isinstance(data, dict) or len(json.dumps(data)) > 4000:
+    if not isinstance(data, dict) or len(json.dumps(data)) > 12000:
         raise ApiError("Слишком большой прогресс")
     tt["progress"] = data
     save_db()
@@ -338,7 +378,7 @@ def h_hint(user, b):
     if not tt.get("hint") and not tt.get("solved"):
         tt["hint"] = True  # запоминаем навсегда: штраф спишется один раз, повторный просмотр бесплатный
         save_db()
-    return {"hint": task.get("hint", ""), "penalty": hint_penalty(task["type"])}
+    return {"hint": task.get("hint", ""), "penalty": hint_penalty(task)}
 
 
 @handler("check")
@@ -352,20 +392,27 @@ def h_check(user, b):
     if not tt or not tt.get("found") or tt.get("solved"):
         raise ApiError("Задание недоступно")
     answer = b.get("answer", "")
+    diff = diff_of(task)
     if task["type"] == "riddle":
+        wait = int((tt.get("lock_until", 0) - now_ms()) / 1000)
+        if wait > 0:
+            raise ApiError(f"Слишком много ошибок. Подумай и попробуй через {wait} сек.")
         variants = [norm_answer(a) for a in str(task["cfg"].get("answer", "")).split("|") if norm_answer(a)]
         ok = norm_answer(answer) in variants
         if ok:
             tt["verified"] = True
         else:
             tt["wrong"] = tt.get("wrong", 0) + 1
+            if tt["wrong"] % 3 == 0:   # после каждых трёх ошибок — пауза
+                tt["lock_until"] = now_ms() + RIDDLE_COOLDOWN[diff] * 1000
         save_db()
-        return {"ok": ok, "wrong": tt.get("wrong", 0)}
+        wait = max(0, int((tt.get("lock_until", 0) - now_ms()) / 1000))
+        return {"ok": ok, "wrong": tt.get("wrong", 0), "wait": wait}
     if task["type"] == "wordle":
         secret = norm_word(task["cfg"].get("answer", "КВЕСТ")) or "КВЕСТ"
         guess = norm_word(answer)
         guesses = tt.setdefault("guesses", [])
-        mx = wordle_attempts(len(secret))
+        mx = wordle_attempts(len(secret), diff)
         if len(guesses) >= mx or tt.get("verified"):
             raise ApiError("Попытки закончились")
         if len(guess) != len(secret):
@@ -383,6 +430,7 @@ def h_check(user, b):
 
 @handler("complete")
 def h_complete(user, b):
+    """Игра присылает долю успеха от 0 до 1, сервер сам переводит её в баллы."""
     room = get_room(b)
     team = get_team(room, user)
     check_open(room)
@@ -393,26 +441,26 @@ def h_complete(user, b):
     if tt.get("solved"):
         raise ApiError("Задание уже выполнено")
     ttype = task["type"]
-    mx = TASK_MAX[ttype]
     if ttype == "riddle":
         if not tt.get("verified"):
             raise ApiError("Ответ не подтверждён")
-        raw = max(10, mx - 5 * tt.get("wrong", 0))
+        ratio = max(0.25, 1 - RIDDLE_PENALTY[diff_of(task)] * tt.get("wrong", 0))
     elif ttype == "wordle":
         n = len(tt.get("guesses", []))
         secret = norm_word(task["cfg"].get("answer", "КВЕСТ")) or "КВЕСТ"
         if tt.get("verified"):
-            raw = max(20, mx - 5 * (n - 1))
-        elif n >= wordle_attempts(len(secret)):
-            raw = 0
+            ratio = max(0.4, 1 - 0.1 * (n - 1))
+        elif n >= wordle_attempts(len(secret), diff_of(task)):
+            ratio = 0
         else:
             raise ApiError("Ещё остались попытки")
     else:
         try:
-            raw = max(0, min(mx, int(b.get("score", 0))))
+            ratio = min(1.0, max(0.0, float(b.get("score", 0))))
         except (TypeError, ValueError):
-            raw = 0
-    pen = hint_penalty(ttype) if (tt.get("hint") and raw > 0) else 0
+            ratio = 0.0
+    raw = max(1, round(task_points(task) * ratio)) if ratio > 0 else 0
+    pen = hint_penalty(task) if (tt.get("hint") and raw > 0) else 0
     final = max(0, raw - pen)
     tt.update(solved=True, score=final, raw=raw, penalty=pen, done_at=now_ms())
     save_db()
@@ -477,7 +525,7 @@ def h_admin_save(user, b):
     tasks, used_codes, used_ids = [], set(), set()
     for rt in raw_tasks:
         ttype = rt.get("type")
-        if ttype not in TASK_MAX:
+        if ttype not in DEFAULT_POINTS:
             raise ApiError("Неизвестный тип задания")
         code = "".join(ch for ch in str(rt.get("code", "")) if ch.isdigit())
         if len(code) != 6:
@@ -495,9 +543,17 @@ def h_admin_save(user, b):
                 return min(1.0, max(0.0, float(v)))
             except (TypeError, ValueError):
                 return None
+        try:
+            points = int(rt.get("points") or DEFAULT_POINTS[ttype])
+        except (TypeError, ValueError):
+            points = DEFAULT_POINTS[ttype]
+        image = rt.get("image", "")
+        if not (isinstance(image, str) and image.startswith("data:image/") and len(image) < 700_000):
+            image = ""
         tasks.append({"id": tid, "type": ttype, "code": code, "title": str(rt.get("title", ""))[:40],
                       "hint": str(rt.get("hint", ""))[:600], "x": coord(rt.get("x")), "y": coord(rt.get("y")),
-                      "cfg": clean_cfg(rt.get("cfg"))})
+                      "points": min(500, max(1, points)), "image": image,
+                      "cfg": normalize_cfg(ttype, clean_cfg(rt.get("cfg")))})
     map_img = d.get("map", "")
     if not (isinstance(map_img, str) and map_img.startswith("data:image/") and len(map_img) < 1_500_000):
         map_img = ""
