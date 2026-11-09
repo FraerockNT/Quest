@@ -5,22 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Новогодние квесты</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <link rel="stylesheet" href="/style.css?v=10">
+    <link rel="stylesheet" href="/style.css?v=11">
 </head>
 <body>
     <canvas id="snow"></canvas>
     <div class="garland" id="garland" aria-hidden="true"></div>
 
     <main class="app">
+        <div id="boot-error" class="card hidden" style="border-color:var(--c-red);white-space:pre-wrap;font-size:13px"></div>
         <!-- Главное меню -->
         <section id="main-menu" class="screen">
             <div class="row between">
                 <h1 class="title">Новогодний квест</h1>
-                <div class="row gap8">
-                    <button id="admin-new" class="icon-btn hidden" title="Создать комнату" onclick="window.app.newRoom()">➕</button>
-                </div>
             </div>
             <p class="subtitle" id="user-greeting">Привет!</p>
+
+            <button id="admin-new" class="btn btn-green hidden" onclick="window.app.newRoom()">➕ Создать комнату (админ)</button>
 
             <div class="card join-card">
                 <div class="card-title">Войти в квест</div>
@@ -30,6 +30,7 @@
             </div>
 
             <div id="quest-list"></div>
+            <p class="muted center" id="my-id"></p>
         </section>
 
         <!-- Комната (игрок) -->
@@ -67,6 +68,7 @@
                 <button class="hint-btn" id="hint-btn" onclick="window.app.hint()">💡</button>
             </div>
             <h2 class="title small" id="quest-title"></h2>
+            <p class="quest-sub" id="quest-sub"></p>
             <div id="quest-content" class="quest-content"></div>
         </section>
 
@@ -99,6 +101,6 @@
         </div>
     </div>
 
-    <script type="module" src="/app.js?v=10"></script>
+    <script type="module" src="/app.js?v=11"></script>
 </body>
 </html>
