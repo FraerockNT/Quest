@@ -34,7 +34,7 @@ log = logging.getLogger("quest")
 # Баллы за задание по умолчанию; админ может поставить свои для каждого задания
 DEFAULT_POINTS = {
     "hanoi": 30, "snake": 20, "quiz": 20, "math": 50, "wordle": 50, "lock": 40,
-    "match": 30, "simon": 30, "memory": 30, "slide": 40, "riddle": 40, "catch": 30, "lights": 40,
+    "match": 30, "simon": 30, "memory": 30, "slide": 40, "riddle": 40, "balls": 40, "lights": 40,
 }
 HINT_RATE = 0.3  # подсказка стоит 30% от баллов за задание
 DIFFS = ("easy", "medium", "hard")
@@ -255,12 +255,20 @@ def h_join(user, b):
     if not room:
         raise ApiError("Комната с таким паролем не найдена")
     uid = str(user["id"])
-    if uid in room["members"]:
+    old_key = room["members"].get(uid)
+    # Уже в комнате и название не указано (или то же самое) — просто заходим
+    if old_key and (not team_name or team_name.lower() == old_key):
         return {"roomId": room["id"]}
     check_open(room)
     if len(team_name) < 2:
         raise ApiError("Введите название команды (минимум 2 символа)")
     key = team_name.lower()
+    if old_key:  # человек ввёл другое название — переводим его в эту команду
+        old = room["teams"].get(old_key)
+        if old:
+            old["members"].pop(uid, None)
+            if not old["members"] and not old["tasks"]:   # пустую команду без прогресса убираем
+                room["teams"].pop(old_key, None)
     team = room["teams"].setdefault(key, {"name": team_name, "members": {}, "tasks": {}})
     team["members"][uid] = display_name(user)
     room["members"][uid] = key
