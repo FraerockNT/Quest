@@ -1,10 +1,9 @@
 const GRID = 15, SIZE = 300, CELLS = SIZE / GRID;
 const BULBS = ['#ff4257', '#ffd23f', '#3ddc84', '#4aa3ff', '#b48cff'];
-// Сложность задаёт и скорость, и способ ходить:
-//  лёгкая — как обычно (вверх/вниз/влево/вправо), средняя — и так, и по диагонали, сложная — ТОЛЬКО по диагонали
-const LEVEL = { easy: { ms: 190, mode: 'orth' }, medium: { ms: 140, mode: 'both' }, hard: { ms: 125, mode: 'diag' } };
-const DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0], ul: [-1, -1], ur: [1, -1], dl: [-1, 1], dr: [1, 1] };
-const ORTH = ['up', 'down', 'left', 'right'], DIAG = ['ul', 'ur', 'dl', 'dr'];
+// Лёгкая — змейка ходит как обычно. Сложная — ТОЛЬКО по диагонали, а кнопки остаются крестом:
+// кнопка меняет одну половинку направления («вверх» — вертикальную, «влево» — горизонтальную).
+const LEVEL = { easy: { ms: 190, diag: false }, hard: { ms: 125, diag: true } };
+const DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
 let interval, keyHandler, alive = false;
 
 const num = (v, d) => { v = Number(v); return Number.isFinite(v) ? Math.round(v) : d; };
@@ -13,29 +12,28 @@ export default {
     title: '🎅 Змейка-гирлянда',
     description: 'Гирлянда собирает подарки для Деда Мороза',
     defaultPoints: 20,
-    defaultHint: 'Стены проходимы насквозь: выйдешь с другой стороны. Не заворачивай гирлянду в кольцо. В сложном режиме змейка ходит только по диагонали, подарки лежат на её «клетках».',
+    rev: 15,   // номер версии файла: по нему приложение находит устаревшие
+    defaultHint: 'Стены проходимы насквозь: выйдешь с другой стороны. Не заворачивай гирлянду в кольцо. В сложном режиме змейка идёт только по диагонали: стрелка «вверх» меняет только вертикальную часть движения, «влево» — горизонтальную.',
     adminFields: [
-        { key: 'difficulty', label: 'Сложность', type: 'select', def: 'medium',
-          options: [['easy', 'Лёгкая — обычные повороты, медленно'], ['medium', 'Средняя — и прямо, и по диагонали'], ['hard', 'Сложная — ТОЛЬКО по диагонали']] },
+        { key: 'difficulty', label: 'Сложность', type: 'select', def: 'easy',
+          options: [['easy', 'Лёгкая — обычные повороты'], ['hard', 'Сложная — только по диагонали, быстрее']] },
         { key: 'snakeApples', label: 'Сколько подарков собрать (1–25)', type: 'number', def: 8, min: 1, max: 25 },
     ],
 
     init(container, tg, onComplete, cfg = {}) {
         this.destroy(); alive = true;
         const target = Math.min(25, Math.max(1, num(cfg.snakeApples, 8)));
-        const lv = LEVEL[cfg.difficulty] || LEVEL.medium;
-        const allowed = lv.mode === 'orth' ? ORTH : lv.mode === 'diag' ? DIAG : [...ORTH, ...DIAG];
+        const lv = cfg.difficulty === 'hard' ? LEVEL.hard : LEVEL.easy;   // старое значение «medium» читается как лёгкая
         const timerEl = document.getElementById('quest-timer');
         let deaths = cfg.progress?.deaths || 0;     // проигрыши запоминаются и немного снижают баллы
 
-        const btn = (d, label) => (allowed.includes(d) ? `<button class="btn btn-ghost" data-d="${d}">${label}</button>` : '<div></div>');
         container.innerHTML = `
             <canvas id="snakeCanvas" width="${SIZE}" height="${SIZE}" class="game-canvas"></canvas>
-            <p class="note">${lv.mode === 'diag' ? 'Змейка ходит только по диагонали! ' : ''}Свайпай по полю или жми кнопки. Проигрышей: <b id="snake-deaths">${deaths}</b></p>
+            <p class="note">${lv.diag ? 'Змейка ходит только по диагонали! ' : ''}Свайпай по полю или жми стрелки. Проигрышей: <b id="snake-deaths">${deaths}</b></p>
             <div class="dpad">
-                ${btn('ul', '↖')}${btn('up', '↑')}${btn('ur', '↗')}
-                ${btn('left', '←')}<div></div>${btn('right', '→')}
-                ${btn('dl', '↙')}${btn('down', '↓')}${btn('dr', '↘')}
+                <div></div><button class="btn btn-ghost" data-d="up">↑</button><div></div>
+                <button class="btn btn-ghost" data-d="left">←</button><div></div><button class="btn btn-ghost" data-d="right">→</button>
+                <div></div><button class="btn btn-ghost" data-d="down">↓</button><div></div>
             </div>`;
         const canvas = container.querySelector('#snakeCanvas');
         const ctx = canvas.getContext('2d');
@@ -45,7 +43,7 @@ export default {
         const placeFood = () => {
             const free = [];
             for (let x = 0; x < CELLS; x++) for (let y = 0; y < CELLS; y++) {
-                if (lv.mode === 'diag' && (x + y) % 2 !== 0) continue;   // по диагонали змейка попадает только на «свои» клетки
+                if (lv.diag && (x + y) % 2 !== 0) continue;   // по диагонали змейка попадает только на «свои» клетки
                 if (!snake.some((s) => s.x === x && s.y === y)) free.push({ x, y });
             }
             food = free[Math.floor(Math.random() * free.length)];
@@ -67,11 +65,18 @@ export default {
         };
 
         const turn = (name) => {
-            if (!allowed.includes(name)) return;
             const d = DIRS[name];
             const last = queue.length ? queue[queue.length - 1] : dir;
-            if ((d[0] === -last[0] && d[1] === -last[1]) || (d[0] === last[0] && d[1] === last[1])) return;
-            if (queue.length < 2) queue.push(d);
+            let next;
+            if (lv.diag) {
+                next = [last[0], last[1]];
+                if (d[0] !== 0) next[0] = d[0]; else next[1] = d[1];     // меняем только одну половинку
+            } else {
+                if (d[0] === -last[0] && d[1] === -last[1]) return;      // разворот на 180° запрещён
+                next = d;
+            }
+            if (next[0] === last[0] && next[1] === last[1]) return;
+            if (queue.length < 2) queue.push(next);
             tg.HapticFeedback.impactOccurred('light');
         };
 
@@ -101,7 +106,7 @@ export default {
 
         const start = () => {
             snake = [{ x: 10, y: 10 }]; score = 0; queue = [];
-            dir = lv.mode === 'diag' ? [1, 1] : [1, 0];
+            dir = lv.diag ? [1, 1] : [1, 0];
             timerEl.innerText = `🎁 0/${target}`;
             placeFood(); draw();
             clearInterval(interval);
@@ -110,23 +115,17 @@ export default {
 
         container.querySelectorAll('[data-d]').forEach((b) => { b.onclick = () => turn(b.dataset.d); });
         keyHandler = (e) => {
-            const map = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', q: 'ul', e: 'ur', z: 'dl', c: 'dr' };
+            const map = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
             if (map[e.key]) { e.preventDefault(); turn(map[e.key]); }
         };
         document.addEventListener('keydown', keyHandler);
 
-        // Свайп: в зависимости от режима превращаем угол в 4 или 8 направлений
         let sx = 0, sy = 0;
         canvas.addEventListener('touchstart', (e) => { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }, { passive: true });
         canvas.addEventListener('touchmove', (e) => {
             const dx = e.touches[0].clientX - sx, dy = e.touches[0].clientY - sy;
             if (Math.max(Math.abs(dx), Math.abs(dy)) < 22) return;
-            const a = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 360;
-            let name;
-            if (lv.mode === 'diag') name = ['dr', 'dl', 'ul', 'ur'][Math.floor(a / 90) % 4];
-            else if (lv.mode === 'orth') name = ['right', 'down', 'left', 'up'][Math.round(a / 90) % 4];
-            else name = ['right', 'dr', 'down', 'dl', 'left', 'ul', 'up', 'ur'][Math.round(a / 45) % 8];
-            turn(name);
+            turn(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up'));
             sx = e.touches[0].clientX; sy = e.touches[0].clientY;
         }, { passive: true });
 
