@@ -33,8 +33,14 @@ log = logging.getLogger("quest")
 
 # Баллы за задание по умолчанию; админ может поставить свои для каждого задания
 DEFAULT_POINTS = {
-    "hanoi": 30, "snake": 20, "quiz": 20, "math": 50, "wordle": 50, "lock": 40,
-    "match": 30, "simon": 30, "memory": 30, "slide": 40, "riddle": 40, "balls": 40, "lights": 40,
+    "hanoi": 30, "snake": 20, "quiz": 40, "math": 50, "wordle": 50, "lock": 40,
+    "match": 20, "simon": 30, "memory": 30, "slide": 40, "riddle": 40, "balls": 40, "lights": 40,
+}
+TYPE_NAMES = {   # названия для печатных карточек (админский подпись)
+    "hanoi": "Башня из подарков", "snake": "Змейка-гирлянда", "quiz": "Викторина", "math": "Новогодняя математика",
+    "wordle": "Слово дня", "lock": "Сейф Деда Мороза", "match": "Спички", "simon": "Огни гирлянды",
+    "memory": "Новогодние пары", "slide": "Пятнашки-картинка", "riddle": "Загадка", "balls": "Шары по коробкам",
+    "lights": "Огни ёлки",
 }
 HINT_RATE = 0.3  # подсказка стоит 30% от баллов за задание
 DIFFS = ("easy", "medium", "hard")
@@ -587,6 +593,46 @@ def h_admin_delete(user, b):
     return {"ok": True}
 
 
+# ───────────── Печать QR-кодов ─────────────
+def sign_print(room_id, exp):
+    key = (BOT_TOKEN or "dev").encode()
+    return hmac.new(key, f"print:{room_id}:{exp}".encode(), hashlib.sha256).hexdigest()
+
+
+def verify_print(room_id, token):
+    exp, _, sig = str(token).partition(".")
+    try:
+        if int(exp) < time.time():
+            return False
+    except ValueError:
+        return False
+    return hmac.compare_digest(sig, sign_print(room_id, exp))
+
+
+@handler("admin_print_link")
+def h_print_link(user, b):
+    need_admin(user)
+    room = get_room(b)
+    exp = int(time.time()) + 2 * 3600
+    return {"path": f"/print?room={room['id']}&t={exp}.{sign_print(room['id'], exp)}"}
+
+
+async def print_data(request):
+    room_id = request.query.get("room", "")
+    room = DB["rooms"].get(room_id)
+    if not room or not verify_print(room_id, request.query.get("t", "")):
+        return json_err("Ссылка устарела. Откройте её заново из приложения.", 403)
+    tasks = [{"n": i + 1, "code": t["code"], "title": t.get("title") or TYPE_NAMES.get(t["type"], "Задание")}
+             for i, t in enumerate(room["tasks"])]
+    return web.json_response({"name": room["name"], "tasks": tasks})
+
+
+async def handle_print(request):
+    resp = web.FileResponse(BASE / "print.html")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 # ───────────── Веб-сервер ─────────────
 def json_err(msg, status=400):
     return web.json_response({"error": msg}, status=status)
@@ -615,7 +661,7 @@ async def api_entry(request):
 
 
 # Раздаём ТОЛЬКО эти файлы. Раньше можно было открыть /main.py и украсть токен бота.
-STATIC_OK = re.compile(r"^(app\.js|snow\.js|style\.css|quests/[a-z0-9_]+\.js)$")
+STATIC_OK = re.compile(r"^(app\.js|snow\.js|qr\.js|style\.css|quests/[a-z0-9_]+\.js)$")
 
 
 async def handle_index(request):
@@ -645,6 +691,8 @@ def make_web_app():
     app = web.Application(client_max_size=3 * 1024 * 1024)
     app.router.add_post("/api/{action}", api_entry)
     app.router.add_get("/", handle_index)
+    app.router.add_get("/print", handle_print)
+    app.router.add_get("/print_data", print_data)
     app.router.add_get("/{filename:.*}", serve_static)
     return app
 
