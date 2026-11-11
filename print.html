@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QR-коды заданий</title>
+<style>
+    * { box-sizing: border-box; font-family: -apple-system, system-ui, 'Segoe UI', Roboto, sans-serif; }
+    body { margin: 0; background: #eef2f8; color: #14213d; }
+    .bar { position: sticky; top: 0; z-index: 5; background: #fff; border-bottom: 1px solid #d5dbe8; padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }
+    .bar h1 { font-size: 18px; margin: 0 8px 0 0; }
+    button { background: #d62839; color: #fff; border: 0; border-radius: 10px; padding: 10px 14px; font-size: 15px; font-weight: 700; cursor: pointer; }
+    button.alt { background: #1f6b4a; }
+    button.small { padding: 6px 10px; font-size: 13px; background: #3b5b8c; }
+    label { font-size: 14px; display: flex; gap: 6px; align-items: center; cursor: pointer; }
+    .hint { font-size: 13px; color: #55627f; padding: 10px 16px 0; max-width: 900px; margin: 0 auto; }
+    #error { display: none; margin: 30px auto; max-width: 500px; background: #fff; border: 2px solid #d62839; border-radius: 14px; padding: 20px; text-align: center; }
+    .sheet { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; padding: 16px; max-width: 900px; margin: 0 auto; }
+    .card { background: #fff; border: 2px dashed #8a97b0; border-radius: 6px; padding: 12px; text-align: center; break-inside: avoid; display: flex; flex-direction: column; align-items: center; justify-content: space-between; min-height: 330px; }
+    .card .room { font-size: 13px; color: #55627f; }
+    .card canvas { width: 210px; height: 210px; image-rendering: pixelated; }
+    .card .code { font: 800 30px ui-monospace, Menlo, Consolas, monospace; letter-spacing: 6px; }
+    .card .num { font-size: 15px; font-weight: 700; }
+    .card .label { font-size: 12px; color: #8a97b0; min-height: 15px; }
+    @page { size: A4; margin: 8mm; }
+    @media print {
+        body { background: #fff; }
+        .bar, .hint, .dl { display: none !important; }
+        .sheet { padding: 0; gap: 0; max-width: none; grid-template-columns: repeat(2, 1fr); }
+        .card { border-radius: 0; height: 92mm; min-height: 0; padding: 4mm; }
+        .card canvas { width: 58mm; height: 58mm; }
+    }
+</style>
+</head>
+<body>
+<div class="bar" id="bar">
+    <h1 id="title">QR-коды</h1>
+    <button onclick="window.print()">🖨 Печать / сохранить в PDF</button>
+    <button class="alt" id="dl-all">⬇ Скачать все PNG</button>
+    <label><input type="checkbox" id="opt-label"> Подписать названием задания (только для админа)</label>
+    <label><input type="checkbox" id="opt-room" checked> Название квеста на карточке</label>
+</div>
+<p class="hint" id="hint">Совет: в окне печати выбери «Сохранить как PDF», чтобы получить один файл со всеми кодами (по 6 карточек на листе A4). Вырежи карточки по пунктиру и спрячь на локации. Игроки наводят камеру в приложении на код — или вводят 6 цифр вручную.</p>
+<div id="error"></div>
+<div class="sheet" id="sheet"></div>
+
+<script type="module">
+import { qrCanvas } from '/qr.js?v=14';
+
+const params = new URLSearchParams(location.search);
+const sheet = document.getElementById('sheet');
+let data = null;
+
+const showError = (msg) => {
+    const e = document.getElementById('error');
+    e.style.display = 'block'; e.textContent = msg;
+    document.getElementById('bar').style.display = 'none';
+    document.getElementById('hint').style.display = 'none';
+};
+
+function render() {
+    const withLabel = document.getElementById('opt-label').checked;
+    const withRoom = document.getElementById('opt-room').checked;
+    sheet.innerHTML = '';
+    data.tasks.forEach((t) => {
+        const card = document.createElement('div');
+        card.className = 'card';
+        const room = document.createElement('div'); room.className = 'room'; room.textContent = withRoom ? `🎄 ${data.name}` : '🎄';
+        const qr = qrCanvas(t.code, 10, 2);
+        const code = document.createElement('div'); code.className = 'code'; code.textContent = t.code;
+        const num = document.createElement('div'); num.className = 'num'; num.textContent = `Задание №${t.n}`;
+        const label = document.createElement('div'); label.className = 'label'; label.textContent = withLabel ? t.title : '';
+        const dl = document.createElement('button'); dl.className = 'small dl'; dl.textContent = '⬇ PNG';
+        dl.onclick = () => download(t);
+        card.append(room, qr, code, num, label, dl);
+        sheet.appendChild(card);
+    });
+}
+
+// Готовая картинка карточки (для скачивания и самостоятельной печати)
+function cardImage(t) {
+    const withLabel = document.getElementById('opt-label').checked;
+    const withRoom = document.getElementById('opt-room').checked;
+    const W = 900, H = 1100;
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const g = c.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+    g.strokeStyle = '#8a97b0'; g.lineWidth = 4; g.setLineDash([16, 12]); g.strokeRect(10, 10, W - 20, H - 20); g.setLineDash([]);
+    g.textAlign = 'center'; g.fillStyle = '#55627f'; g.font = '34px sans-serif';
+    g.fillText(withRoom ? `🎄 ${data.name}` : '🎄', W / 2, 90);
+    const qr = qrCanvas(t.code, 1, 2);                       // маленькая матрица, увеличим без размытия
+    const size = 700;
+    g.imageSmoothingEnabled = false;
+    g.drawImage(qr, (W - size) / 2, 130, size, size);
+    g.fillStyle = '#14213d'; g.font = 'bold 120px ui-monospace, Menlo, Consolas, monospace';
+    g.fillText(t.code.split('').join(' '), W / 2, 920);
+    g.font = 'bold 48px sans-serif'; g.fillText(`Задание №${t.n}`, W / 2, 1000);
+    if (withLabel) { g.fillStyle = '#8a97b0'; g.font = '34px sans-serif'; g.fillText(t.title, W / 2, 1055); }
+    return c;
+}
+
+function download(t) {
+    return new Promise((resolve) => cardImage(t).toBlob((blob) => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `qr-zadanie-${t.n}-${t.code}.png`;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => { URL.revokeObjectURL(a.href); resolve(); }, 300);
+    }, 'image/png'));
+}
+
+document.getElementById('dl-all').onclick = async () => { for (const t of data.tasks) { await download(t); await new Promise((r) => setTimeout(r, 350)); } };
+document.getElementById('opt-label').onchange = render;
+document.getElementById('opt-room').onchange = render;
+
+try {
+    const res = await fetch(`/print_data?room=${encodeURIComponent(params.get('room') || '')}&t=${encodeURIComponent(params.get('t') || '')}`);
+    const json = await res.json();
+    if (!res.ok || json.error) throw new Error(json.error || 'Ошибка');
+    data = json;
+    document.getElementById('title').textContent = `QR-коды · ${data.name}`;
+    document.title = `QR-коды · ${data.name}`;
+    render();
+} catch (e) { showError(e.message || 'Не удалось загрузить коды'); }
+</script>
+</body>
+</html>

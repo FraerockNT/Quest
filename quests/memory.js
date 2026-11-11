@@ -13,6 +13,7 @@ export default {
     title: '🃏 Новогодние пары',
     description: 'Найди все пары одинаковых карточек',
     defaultPoints: 30,
+    rev: 15,   // номер версии файла: по нему приложение находит устаревшие
     defaultHint: 'Запоминай, где какая картинка. Открывай карточки по порядку, ряд за рядом, чтобы не забыть уже виденные.',
     EMOJI_COUNT: new Set(EMOJI).size,   // для проверки
     adminFields: [
@@ -48,7 +49,7 @@ export default {
 
         deck.forEach((emoji, i) => {
             const c = document.createElement('div');
-            c.className = 'mem-card' + (done.has(i) ? ' done' : ''); c.dataset.v = emoji; c.innerText = emoji;
+            c.className = 'mem-card' + (done.has(i) ? ' done' : ''); c.dataset.v = emoji; c.innerHTML = `<span>${emoji}</span>`;
             c.onclick = () => {
                 if (lock || c.classList.contains('open') || c.classList.contains('done')) return;
                 c.classList.add('open'); opened.push({ c, i });

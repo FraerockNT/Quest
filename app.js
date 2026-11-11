@@ -1,11 +1,13 @@
-import { startSnow } from './snow.js?v=11';
+import { startSnow } from './snow.js?v=15';
 // Задания подключаются по одному: если какого-то файла нет, остальное приложение всё равно работает
+const REQUIRED_REV = 15;   // какой версии должны быть файлы заданий
+const FALLBACK_POINTS = { hanoi: 30, snake: 20, quiz: 40, math: 50, wordle: 50, lock: 40, match: 20, simon: 30, memory: 30, slide: 40, riddle: 40, balls: 40, lights: 40 };
 const FILES = { hanoi: 'hanoi', snake: 'snake', quiz: 'quiz', math: 'math', wordle: 'wordle', lock: 'lock', match: 'match',
-    simon: 'simon', memory: 'memory', slide: 'slide', riddle: 'riddle', lights: 'lights', catch: 'catch' };
+    simon: 'simon', memory: 'memory', slide: 'slide', riddle: 'riddle', lights: 'lights', balls: 'balls' };
 const QUESTS = {};
 const missing = [];
 await Promise.all(Object.entries(FILES).map(async ([key, file]) => {
-    try { QUESTS[key] = (await import(`./quests/${file}.js?v=11`)).default; }
+    try { QUESTS[key] = (await import(`./quests/${file}.js?v=15`)).default; }
     catch (e) { missing.push(`${file}.js (${e.message})`); }
 }));
 
@@ -18,6 +20,10 @@ function bootError(text) {
 }
 window.addEventListener('error', (e) => bootError('Ошибка: ' + e.message));
 window.addEventListener('unhandledrejection', (e) => bootError('Ошибка: ' + (e.reason?.message || e.reason)));
+// Баллы по умолчанию: берём из файла задания, а если он старый — из запасной таблицы (раньше тут мог быть «undefined»)
+const defPts = (type) => QUESTS[type]?.defaultPoints ?? QUESTS[type]?.maxScore ?? FALLBACK_POINTS[type] ?? 30;
+const stale = Object.entries(QUESTS).filter(([, q]) => q.rev !== REQUIRED_REV).map(([k]) => `${FILES[k]}.js`);
+let staleShown = false;
 if (missing.length) bootError('Не загрузились файлы заданий: ' + missing.join('; ') + '. Загрузите их в папку quests/ на сервер.');
 
 // В обычном браузере (для проверки) подставляем «заглушку» Telegram. ?as=123 — зайти как игрок 123.
@@ -66,6 +72,13 @@ function show(name) {
     clearInterval(refreshTimer);
     window.scrollTo(0, 0);
 }
+let toastTimer;
+function toast(msg) {
+    const el = $('toast');
+    el.innerText = msg; el.classList.remove('hidden');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.add('hidden'), 4000);
+}
 function modal(html, onClose) {
     $('modal-body').innerHTML = html;
     $('modal').classList.remove('hidden');
@@ -113,6 +126,7 @@ async function renderMenu() {
     const user = tg.initDataUnsafe?.user;
     $('user-greeting').innerText = `${me.admin ? 'Привет, админ' : 'Привет'}, ${user?.first_name || 'друг'}! ❄️`;
     $('admin-new').classList.toggle('hidden', !me.admin);
+    if (me.admin && stale.length && !staleShown) { staleShown = true; bootError('Устаревшие файлы заданий, замените их на новые версии: ' + stale.join(', ')); }
     $('my-id').innerText = `Ваш Telegram ID: ${me.id}${me.admin ? ' · админ' : ''}`;
     list.innerHTML = '';
     if (!me.rooms.length) {
@@ -191,6 +205,7 @@ function renderRoom() {
         }
         el.innerHTML = `<div class="left"><span class="num">${t.n}</span><div><div class="tname">${esc(name)}</div>
             <div class="tsub">${esc(sub)}</div></div></div><div class="right">${right}</div>`;
+        el.dataset.id = t.id;
         if (t.state === 'found') el.onclick = () => startTask(t.id);
         box.appendChild(el);
     });
@@ -209,7 +224,11 @@ async function unlock(codeArg) {
         renderRoom();
         if (r.state === 'solved') return tg.showAlert('Это задание вы уже выполнили!');
         tg.HapticFeedback.notificationOccurred('success');
-        await startTask(r.taskId);
+        const t = room.tasks.find((x) => x.id === r.taskId);
+        toast(`✅ Задание №${t?.n ?? ''} найдено! Нажми «Играть» в списке заданий.`);
+        // подсвечиваем найденное задание и показываем его
+        const card = document.querySelector(`#room-tasks [data-id="${r.taskId}"]`);
+        if (card) { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); card.classList.add('flash'); setTimeout(() => card.classList.remove('flash'), 3000); }
     });
 }
 function scanQr() {
@@ -287,18 +306,24 @@ async function finishTask(raw) {
         () => leaveQuest());
 }
 
+let leaving = false;
 async function leaveQuest() {
-    if (active?.quest.destroy) active.quest.destroy();
+    if (leaving) return;
+    leaving = true;
+    try { active?.quest.destroy?.(); } catch (e) {}     // ошибка в задании не должна мешать выйти
     active = null;
-    room = await api('room', { roomId: room.id }).catch(() => room);
-    show('room-screen'); renderRoom();
+    show('room-screen'); renderRoom();                    // комната появляется сразу, данные обновятся следом
     refreshTimer = setInterval(refreshRoom, 12000);
+    leaving = false;
+    try { room = await api('room', { roomId: room.id }); renderRoom(); } catch (e) {}
 }
 
 // ───────────── Админ: просмотр комнаты ─────────────
 async function openAdminRoom(id) {
     await safe(async () => {
         adminRoom = await api('admin_room', { roomId: id });
+        let qrSvg = null;
+        try { ({ qrSvg } = await import('./qr.js?v=14')); } catch (e) {}   // без qr.js просто не будет предпросмотра
         const r = adminRoom;
         const tasks = r.tasks.map((t, i) => ({ ...t, n: i + 1 }));
         const solvedBy = (t) => r.teams.filter((tm) => tm.tasks[t.id]?.solved).length;
@@ -307,7 +332,12 @@ async function openAdminRoom(id) {
             <h2 class="title">${esc(r.name)}</h2>
             <p class="subtitle">Пароль: <b>${esc(r.password)}</b> · ${new Date(r.start).toLocaleString('ru')} — ${new Date(r.end).toLocaleString('ru')}</p>
             <div class="card"><div class="card-title">🔑 Коды заданий (спрячь их на локации)</div>
-                ${tasks.map((t) => `<div class="board-row"><span>${t.n}. ${esc(taskTitle(t))} <span class="muted">(${t.points || QUESTS[t.type].defaultPoints} б.)</span></span><span class="code-pill">${t.code}</span></div>`).join('')}
+                ${tasks.map((t) => `<div class="board-row"><span>${t.n}. ${esc(taskTitle(t))} <span class="muted">(${t.points || defPts(t.type)} б.)</span></span><span class="code-pill">${t.code}</span></div>`).join('')}
+            </div>
+            <div class="card"><div class="card-title">🖨 QR-коды заданий</div>
+                <p class="muted">Распечатай и спрячь на локации. Игрок наводит камеру в приложении на код или вводит 6 цифр.</p>
+                <div class="qr-grid">${tasks.map((t) => `<div class="qr-item">${qrSvg ? qrSvg(t.code, { border: 2 }) : ''}<div class="code-pill" style="font-size:14px;letter-spacing:2px">${t.code}</div><div class="muted">№${t.n}</div></div>`).join('')}</div>
+                <button class="btn" onclick="window.app.printQr()">🖨 Открыть для печати и скачивания</button>
             </div>
             ${mapHtml(tasks, r.map, () => 'blue', false)}
             <div class="card"><div class="card-title">🏆 Команды (${r.teams.length})</div>
@@ -322,6 +352,15 @@ async function openAdminRoom(id) {
             </div>`;
         $('admin-room-body').innerHTML = html;
         show('admin-room');
+    });
+}
+// Страница печати открывается в обычном браузере: там работают печать, PDF и скачивание картинок
+async function printQr() {
+    await safe(async () => {
+        const r = await api('admin_print_link', { roomId: adminRoom.id });
+        const url = location.origin + r.path;
+        if (tg.openLink) tg.openLink(url); else window.open(url, '_blank');
+        modal(`<h3>Страница для печати</h3><p>Открываю в браузере. Если не открылась, скопируй ссылку (действует 2 часа, никому её не отправляй):</p><p style="word-break:break-all;user-select:text;font-size:12px">${esc(url)}</p>`);
     });
 }
 async function deleteRoom() {
@@ -339,6 +378,7 @@ function newRoom() {
 }
 function editRoom() {
     edit = JSON.parse(JSON.stringify(adminRoom)); edit.placing = null;
+    edit.tasks.forEach((t) => { if (!t.points && QUESTS[t.type]) t.points = defPts(t.type); });
     edit.tasks.forEach((t) => { if (!t.hint && QUESTS[t.type]) t.hint = QUESTS[t.type].adminHint ?? QUESTS[t.type].defaultHint ?? ''; });
     renderEdit(); show('admin-edit');
 }
@@ -367,7 +407,7 @@ function renderEdit() {
             <label class="field">6-значный код (его прячешь на локации)
                 <div class="row gap8"><input type="text" inputmode="numeric" maxlength="6" data-ti="${i}" data-f="code" value="${esc(t.code)}">
                 <button class="icon-btn" data-act="dice" data-ti="${i}">🎲</button></div></label>
-            <label class="field">Баллов за задание<input type="number" data-ti="${i}" data-f="points" value="${t.points || q.defaultPoints}" min="1" max="500"></label>
+            <label class="field">Баллов за задание (по умолчанию ${defPts(t.type)})<input type="number" inputmode="numeric" data-ti="${i}" data-f="points" value="${t.points || defPts(t.type)}" min="1" max="500"></label>
             ${(q.adminFields || []).map((f) => fieldHtml(f, t.cfg?.[f.key], i, t.cfg || {})).join('')}
             ${t.type === 'riddle' ? `<div class="field">Фото к загадке (необязательно)
                 <input type="file" accept="image/*" data-img="${i}">
@@ -424,7 +464,7 @@ async function onEditClick(ev) {
         const act = btn.dataset.act, i = +btn.dataset.ti;
         if (act === 'add') {
             const type = $('new-type').value;
-            const t = { id: '', type, code: randCode(), title: '', hint: '', x: null, y: null, points: QUESTS[type].defaultPoints, image: '', cfg: {} };
+            const t = { id: '', type, code: randCode(), title: '', hint: '', x: null, y: null, points: defPts(type), image: '', cfg: {} };
             collectCfg(t, QUESTS[type]); QUESTS[type].normalizeCfg?.(t.cfg); t.hint = QUESTS[type].adminHint ?? QUESTS[type].defaultHint ?? ''; edit.tasks.push(t); renderEdit();
         } else if (act === 'del') { edit.tasks.splice(i, 1); edit.placing = null; renderEdit(); }
         else if (act === 'delimg') { edit.tasks[i].image = ''; renderEdit(); }
@@ -465,6 +505,13 @@ async function saveRoom() {
     if (!e.password.trim()) return tg.showAlert('Придумай пароль для входа');
     if (!e.tasks.length) return tg.showAlert('Добавь хотя бы одно задание');
     if (!(e.start > 0 && e.end > e.start)) return tg.showAlert('Проверь даты: конец должен быть позже начала');
+    for (let i = 0; i < e.tasks.length; i++) {
+        const t = e.tasks[i], q = QUESTS[t.type];
+        if (!q) return tg.showAlert(`Задание №${i + 1}: этот тип больше не существует, удалите его`);
+        const p = Number(t.points === undefined || t.points === '' ? defPts(t.type) : t.points);
+        if (!Number.isInteger(p) || p < 1 || p > 500) return tg.showAlert(`Задание №${i + 1} (${q.title}): укажите баллы целым числом от 1 до 500`);
+        t.points = p;      // баллы всегда записываются явно
+    }
     e.tasks.forEach((t) => QUESTS[t.type].normalizeCfg?.(t.cfg));
     const codes = e.tasks.map((t) => t.code);
     if (codes.some((c) => !/^\d{6}$/.test(c))) return tg.showAlert('Каждый код должен состоять из 6 цифр');
@@ -480,7 +527,9 @@ async function saveRoom() {
 // ───────────── Кнопка «Назад» ─────────────
 async function back() {
     if (screen === 'quest-container') {
-        if (active && !active.finished && !(await confirmP('Выйти из задания? Прогресс сохранится только у заданий с попытками.'))) return;
+        // Спрашиваем только там, где выход что-то стоит (например, открытый вопрос викторины)
+        const warn = active && !active.finished ? active.quest.leaveWarning?.() : '';
+        if (warn && !(await confirmP(warn))) return;
         return leaveQuest();
     }
     if (screen === 'admin-edit') return edit.id ? show('admin-room') : renderMenu();
@@ -499,5 +548,7 @@ document.addEventListener('change', (ev) => {
 });
 document.addEventListener('click', (ev) => { if (screen === 'admin-edit') onEditClick(ev); });
 
-window.app = { back, joinRoom, unlock: () => unlock(), scanQr, hint: () => takeHint(true), newRoom, editRoom, deleteRoom, closeModal };
-window.onload = init;
+window.app = { printQr, back, joinRoom, unlock: () => unlock(), scanQr, hint: () => takeHint(true), newRoom, editRoom, deleteRoom, closeModal };
+// Запускаем сразу: раньше запуск ждал события загрузки страницы, а оно могло случиться раньше,
+// чем подгрузятся файлы заданий, и тогда приложение просто не стартовало.
+init().catch((e) => bootError('Ошибка запуска: ' + (e?.message || e)));
