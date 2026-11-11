@@ -243,3 +243,8 @@ label.field { display: flex; flex-direction: column; gap: 5px; font-size: 13px; 
 .bbox.sel { border-color: var(--gold); box-shadow: 0 0 16px rgba(246, 196, 83, .45); }
 .ball { width: 38px; height: 38px; border-radius: 50%; background: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, .85), rgba(255, 255, 255, 0) 38%), var(--c); box-shadow: inset 0 -4px 6px rgba(0, 0, 0, .25), 0 2px 4px rgba(0, 0, 0, .35); transition: transform .12s; }
 .ball.up { transform: translateY(-14px); }
+
+/* ───── QR-коды в админке ───── */
+.qr-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.qr-item { background: #fff; border-radius: 10px; padding: 6px 6px 8px; text-align: center; color: #14213d; }
+.qr-item svg { width: 100%; display: block; }
