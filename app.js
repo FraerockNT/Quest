@@ -1,11 +1,11 @@
-import { startSnow } from './snow.js?v=13';
+import { startSnow } from './snow.js?v=14';
 // Задания подключаются по одному: если какого-то файла нет, остальное приложение всё равно работает
 const FILES = { hanoi: 'hanoi', snake: 'snake', quiz: 'quiz', math: 'math', wordle: 'wordle', lock: 'lock', match: 'match',
     simon: 'simon', memory: 'memory', slide: 'slide', riddle: 'riddle', lights: 'lights', balls: 'balls' };
 const QUESTS = {};
 const missing = [];
 await Promise.all(Object.entries(FILES).map(async ([key, file]) => {
-    try { QUESTS[key] = (await import(`./quests/${file}.js?v=13`)).default; }
+    try { QUESTS[key] = (await import(`./quests/${file}.js?v=14`)).default; }
     catch (e) { missing.push(`${file}.js (${e.message})`); }
 }));
 
@@ -303,6 +303,8 @@ async function leaveQuest() {
 async function openAdminRoom(id) {
     await safe(async () => {
         adminRoom = await api('admin_room', { roomId: id });
+        let qrSvg = null;
+        try { ({ qrSvg } = await import('./qr.js?v=14')); } catch (e) {}   // без qr.js просто не будет предпросмотра
         const r = adminRoom;
         const tasks = r.tasks.map((t, i) => ({ ...t, n: i + 1 }));
         const solvedBy = (t) => r.teams.filter((tm) => tm.tasks[t.id]?.solved).length;
@@ -311,7 +313,12 @@ async function openAdminRoom(id) {
             <h2 class="title">${esc(r.name)}</h2>
             <p class="subtitle">Пароль: <b>${esc(r.password)}</b> · ${new Date(r.start).toLocaleString('ru')} — ${new Date(r.end).toLocaleString('ru')}</p>
             <div class="card"><div class="card-title">🔑 Коды заданий (спрячь их на локации)</div>
-                ${tasks.map((t) => `<div class="board-row"><span>${t.n}. ${esc(taskTitle(t))} <span class="muted">(${t.points || QUESTS[t.type].defaultPoints} б.)</span></span><span class="code-pill">${t.code}</span></div>`).join('')}
+                ${tasks.map((t) => `<div class="board-row"><span>${t.n}. ${esc(taskTitle(t))} <span class="muted">(${t.points || QUESTS[t.type]?.defaultPoints || '?'} б.)</span></span><span class="code-pill">${t.code}</span></div>`).join('')}
+            </div>
+            <div class="card"><div class="card-title">🖨 QR-коды заданий</div>
+                <p class="muted">Распечатай и спрячь на локации. Игрок наводит камеру в приложении на код или вводит 6 цифр.</p>
+                <div class="qr-grid">${tasks.map((t) => `<div class="qr-item">${qrSvg ? qrSvg(t.code, { border: 2 }) : ''}<div class="code-pill" style="font-size:14px;letter-spacing:2px">${t.code}</div><div class="muted">№${t.n}</div></div>`).join('')}</div>
+                <button class="btn" onclick="window.app.printQr()">🖨 Открыть для печати и скачивания</button>
             </div>
             ${mapHtml(tasks, r.map, () => 'blue', false)}
             <div class="card"><div class="card-title">🏆 Команды (${r.teams.length})</div>
@@ -326,6 +333,15 @@ async function openAdminRoom(id) {
             </div>`;
         $('admin-room-body').innerHTML = html;
         show('admin-room');
+    });
+}
+// Страница печати открывается в обычном браузере: там работают печать, PDF и скачивание картинок
+async function printQr() {
+    await safe(async () => {
+        const r = await api('admin_print_link', { roomId: adminRoom.id });
+        const url = location.origin + r.path;
+        if (tg.openLink) tg.openLink(url); else window.open(url, '_blank');
+        modal(`<h3>Страница для печати</h3><p>Открываю в браузере. Если не открылась, скопируй ссылку (действует 2 часа, никому её не отправляй):</p><p style="word-break:break-all;user-select:text;font-size:12px">${esc(url)}</p>`);
     });
 }
 async function deleteRoom() {
@@ -343,6 +359,7 @@ function newRoom() {
 }
 function editRoom() {
     edit = JSON.parse(JSON.stringify(adminRoom)); edit.placing = null;
+    edit.tasks.forEach((t) => { if (!t.points && QUESTS[t.type]) t.points = QUESTS[t.type].defaultPoints; });
     edit.tasks.forEach((t) => { if (!t.hint && QUESTS[t.type]) t.hint = QUESTS[t.type].adminHint ?? QUESTS[t.type].defaultHint ?? ''; });
     renderEdit(); show('admin-edit');
 }
@@ -371,7 +388,7 @@ function renderEdit() {
             <label class="field">6-значный код (его прячешь на локации)
                 <div class="row gap8"><input type="text" inputmode="numeric" maxlength="6" data-ti="${i}" data-f="code" value="${esc(t.code)}">
                 <button class="icon-btn" data-act="dice" data-ti="${i}">🎲</button></div></label>
-            <label class="field">Баллов за задание<input type="number" data-ti="${i}" data-f="points" value="${t.points || q.defaultPoints}" min="1" max="500"></label>
+            <label class="field">Баллов за задание (стандартно ${q.defaultPoints})<input type="number" inputmode="numeric" data-ti="${i}" data-f="points" value="${t.points || q.defaultPoints}" min="1" max="500"></label>
             ${(q.adminFields || []).map((f) => fieldHtml(f, t.cfg?.[f.key], i, t.cfg || {})).join('')}
             ${t.type === 'riddle' ? `<div class="field">Фото к загадке (необязательно)
                 <input type="file" accept="image/*" data-img="${i}">
@@ -469,6 +486,13 @@ async function saveRoom() {
     if (!e.password.trim()) return tg.showAlert('Придумай пароль для входа');
     if (!e.tasks.length) return tg.showAlert('Добавь хотя бы одно задание');
     if (!(e.start > 0 && e.end > e.start)) return tg.showAlert('Проверь даты: конец должен быть позже начала');
+    for (let i = 0; i < e.tasks.length; i++) {
+        const t = e.tasks[i], q = QUESTS[t.type];
+        if (!q) return tg.showAlert(`Задание №${i + 1}: этот тип больше не существует, удалите его`);
+        const p = Number(t.points === undefined || t.points === '' ? q.defaultPoints : t.points);
+        if (!Number.isInteger(p) || p < 1 || p > 500) return tg.showAlert(`Задание №${i + 1} (${q.title}): укажите баллы целым числом от 1 до 500`);
+        t.points = p;      // баллы всегда записываются явно
+    }
     e.tasks.forEach((t) => QUESTS[t.type].normalizeCfg?.(t.cfg));
     const codes = e.tasks.map((t) => t.code);
     if (codes.some((c) => !/^\d{6}$/.test(c))) return tg.showAlert('Каждый код должен состоять из 6 цифр');
@@ -505,7 +529,7 @@ document.addEventListener('change', (ev) => {
 });
 document.addEventListener('click', (ev) => { if (screen === 'admin-edit') onEditClick(ev); });
 
-window.app = { back, joinRoom, unlock: () => unlock(), scanQr, hint: () => takeHint(true), newRoom, editRoom, deleteRoom, closeModal };
+window.app = { printQr, back, joinRoom, unlock: () => unlock(), scanQr, hint: () => takeHint(true), newRoom, editRoom, deleteRoom, closeModal };
 // Запускаем сразу: раньше запуск ждал события загрузки страницы, а оно могло случиться раньше,
 // чем подгрузятся файлы заданий, и тогда приложение просто не стартовало.
 init().catch((e) => bootError('Ошибка запуска: ' + (e?.message || e)));
