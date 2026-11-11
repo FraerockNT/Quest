@@ -1,4 +1,4 @@
-import { QUESTIONS } from './quizdata.js?v=13';
+import { QUESTIONS } from './quizdata.js?v=14';
 
 const LEVELS = { easy: ['e'], medium: ['m'], hard: ['h'], mixed: ['e', 'm', 'h'] };
 // Итог викторины по 1000 очков переводится в долю баллов задания
